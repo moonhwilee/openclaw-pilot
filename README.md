@@ -15,7 +15,7 @@ pilot plan "Draft a document strategy plan"
 From GitHub before npm publishing:
 
 ```bash
-npm install -g github:moonhwilee/openclaw-pilot#v0.1.2
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.1.3
 pilot init
 pilot plan "Draft a document strategy plan"
 ```

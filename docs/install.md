@@ -13,7 +13,7 @@ pilot plan "Draft a document strategy plan"
 Before npm publishing, install from a GitHub release tag:
 
 ```bash
-npm install -g github:moonhwilee/openclaw-pilot#v0.1.0
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.1.3
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
