@@ -1,0 +1,34 @@
+{
+  "name": "openclaw-pilot",
+  "version": "0.1.0",
+  "private": false,
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moonhwilee/openclaw-pilot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moonhwilee/openclaw-pilot/issues"
+  },
+  "homepage": "https://github.com/moonhwilee/openclaw-pilot#readme",
+  "bin": {
+    "pilot": "./src/cli.ts"
+  },
+  "files": [
+    "src",
+    "fixtures",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "doctor": "node src/cli.ts doctor",
+    "smoke": "node src/cli.ts smoke",
+    "pilot": "node src/cli.ts",
+    "test": "node --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "packageManager": "npm@11.9.0"
+}

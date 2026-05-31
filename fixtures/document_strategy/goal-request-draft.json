@@ -1,0 +1,69 @@
+{
+  "schema_version": "pilot.goal_request.v0",
+  "goal": {
+    "id": "document-strategy-draft-goal",
+    "statement": "Create a bounded local document strategy execution artifact.",
+    "profile": "document_strategy"
+  },
+  "plan": {
+    "goal": "Create a bounded local document strategy execution artifact.",
+    "scope": [
+      "Create one local run artifact that summarizes the document strategy goal."
+    ],
+    "out_of_scope": [
+      "External messages",
+      "Shell execution",
+      "Telegram routing",
+      "Agent spawning"
+    ],
+    "success_criteria": [
+      "A local artifact exists in the run directory.",
+      "No external or dangerous action is performed.",
+      "Execution waits for scoped approval before creating the artifact."
+    ],
+    "risks_assumptions": [
+      "This fixture is local-only and does not judge semantic quality."
+    ],
+    "action_boundaries": {
+      "allowed_actions": [
+        "create_artifact"
+      ],
+      "approval_required_actions": [
+        "create local goal artifact"
+      ],
+      "disallowed_actions": [
+        "external_message",
+        "shell_escape",
+        "telegram_routing",
+        "agent_spawn"
+      ]
+    },
+    "verification_gates": [
+      "goal-run.json exists",
+      "final.md exists",
+      "no receipts exist before approval"
+    ]
+  },
+  "preflight": {
+    "risk_class": "low",
+    "typed_capabilities": [
+      "create_artifact"
+    ],
+    "dangerous_action_gates": [
+      "external_message",
+      "payment",
+      "credential_access",
+      "server_restart",
+      "destructive_filesystem",
+      "deploy",
+      "pr_merge",
+      "release"
+    ],
+    "receipt_required": true,
+    "max_rounds": 1,
+    "stop_conditions": [
+      "success_criteria_met",
+      "approval_boundary_hit"
+    ]
+  }
+}

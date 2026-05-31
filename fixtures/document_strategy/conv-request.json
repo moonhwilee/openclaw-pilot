@@ -1,0 +1,22 @@
+{
+  "schema_version": "pilot.conv_request.v0",
+  "anchor": {
+    "id": "document-strategy-fixture",
+    "path": "evidence-packet.json",
+    "description": "Document strategy verification fixture has known bounded findings."
+  },
+  "findings": [
+    {
+      "id": "missing-support-note",
+      "description": "Add a local evidence update note for the document strategy fixture.",
+      "status": "open"
+    }
+  ],
+  "preflight": {
+    "risk_class": "low",
+    "allowed_capabilities": ["local_artifact_note", "finding_status_update"],
+    "forbidden_capabilities": ["external_message", "public_post", "deploy", "credential_access", "shell_execution", "telegram_routing"],
+    "max_rounds": 2,
+    "stop_condition": "all_findings_reduced"
+  }
+}

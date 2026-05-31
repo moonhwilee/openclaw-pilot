@@ -1,0 +1,30 @@
+{
+  "schema_version": "pilot.evidence.v0",
+  "claim": {
+    "id": "document-strategy-fixture",
+    "statement": "The document strategy fixture has an artifact that can be structurally verified.",
+    "profile": "document_strategy"
+  },
+  "verdict_criteria": [
+    {
+      "id": "artifact-present",
+      "description": "The document strategy artifact exists and is in the approved packet scope.",
+      "required": true
+    }
+  ],
+  "evidence": [
+    {
+      "id": "document-strategy-plan",
+      "type": "artifact",
+      "description": "Reusable Phase 2 document_strategy fixture artifact.",
+      "criteria_ids": ["artifact-present"],
+      "supports_claim": true,
+      "in_scope": true,
+      "path": "plan.md"
+    }
+  ],
+  "reviewer_boundary": {
+    "semantic_review_required": true,
+    "deterministic_checks_only": true
+  }
+}

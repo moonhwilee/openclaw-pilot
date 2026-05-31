@@ -1,0 +1,32 @@
+{
+  "schema_version": "pilot.evidence.v0",
+  "claim": {
+    "id": "research-profile-fixture",
+    "statement": "The research profile fixture has an in-scope local source note.",
+    "profile": "research"
+  },
+  "verdict_criteria": [
+    {
+      "id": "source-note-present",
+      "description": "A local source note artifact exists for the research profile fixture.",
+      "required": true
+    }
+  ],
+  "evidence": [
+    {
+      "id": "source-note",
+      "type": "artifact",
+      "description": "Research profile source note fixture.",
+      "criteria_ids": [
+        "source-note-present"
+      ],
+      "supports_claim": true,
+      "in_scope": true,
+      "path": "source-note.md"
+    }
+  ],
+  "reviewer_boundary": {
+    "semantic_review_required": true,
+    "deterministic_checks_only": true
+  }
+}

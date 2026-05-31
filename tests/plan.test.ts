@@ -1,0 +1,124 @@
+import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { runPlan } from "../src/plan/run.ts";
+import { validateCommonPlanContract, validateEventRecord, validateGoalArtifact } from "../src/schema/index.ts";
+import { isPhase1TerminalStatus } from "../src/state/index.ts";
+import type { CommonPlanContract } from "../src/types.ts";
+
+async function tempStateRoot(): Promise<string> {
+  return mkdtemp(join(tmpdir(), "pilot-state-"));
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("runPlan creates the four v0 artifacts and completes without execution", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = await runPlan({
+    request: "Draft a launch-readiness planning checklist for a local-only pilot.",
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed_plan");
+  assert.equal(result.created_files.length, 4);
+  for (const file of ["goal.json", "plan.md", "events.jsonl", "final.md"]) {
+    assert.equal(await fileExists(join(result.artifact_dir, file)), true, `${file} should exist`);
+  }
+
+  const goal = JSON.parse(await readFile(join(result.artifact_dir, "goal.json"), "utf8"));
+  assert.equal(goal.schema_version, "pilot.goal.v0");
+  assert.equal(goal.status, "completed_plan");
+  assert.equal(goal.profile, "document_strategy");
+  assert.deepEqual(validateGoalArtifact(goal), []);
+  assert.equal(isPhase1TerminalStatus(goal.status), true);
+
+  const events = await readFile(join(result.artifact_dir, "events.jsonl"), "utf8");
+  assert.match(events, /"execution":"not_performed"/);
+  for (const line of events.trim().split("\n")) {
+    assert.deepEqual(validateEventRecord(JSON.parse(line)), []);
+  }
+  assert.equal(await fileExists(join(result.artifact_dir, "approval.json")), false);
+  assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), false);
+});
+
+test("vague request ends in needs_user_decision and records ambiguity", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = await runPlan({
+    request: "해줘",
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "needs_user_decision");
+  assert.ok(result.goal.ambiguity_questions.length > 0);
+  assert.ok(result.plan.ambiguity_questions?.length);
+});
+
+test("generated plan satisfies the Common Plan Contract", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = await runPlan({
+    request: "Prepare a document strategy plan for Phase 1 validation.",
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.deepEqual(validateCommonPlanContract(result.plan), []);
+});
+
+test("overbroad allowed actions are rejected by schema validation", () => {
+  const plan: CommonPlanContract = {
+    goal: "Bad plan",
+    scope: ["anything"],
+    out_of_scope: ["nothing"],
+    success_criteria: ["done"],
+    risks_assumptions: ["none"],
+    action_boundaries: {
+      allowed_actions: ["use tools", "fix issue"],
+      approval_required_actions: [],
+      disallowed_actions: [],
+    },
+    verification_gates: ["review"],
+  };
+
+  const errors = validateCommonPlanContract(plan);
+  assert.ok(errors.some((error) => error.includes("overbroad allowed action")));
+});
+
+test("CLI goal mode requires a structured request path", () => {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "goal"], {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires a goal request JSON path/);
+});
+
+test("CLI smoke creates a local plan artifact", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = spawnSync(
+    process.execPath,
+    ["src/cli.ts", "plan", "Draft a document strategy plan for a local pilot."],
+    {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, PILOT_STATE_ROOT: stateRoot },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, "completed_plan");
+  assert.equal(await fileExists(join(output.artifact_dir, "goal.json")), true);
+});
