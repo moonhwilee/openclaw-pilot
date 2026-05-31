@@ -1,6 +1,6 @@
 {
   "name": "openclaw-pilot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "license": "MIT",
   "type": "module",
@@ -13,16 +13,19 @@
   },
   "homepage": "https://github.com/moonhwilee/openclaw-pilot#readme",
   "bin": {
-    "pilot": "./src/cli.ts"
+    "pilot": "./dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "fixtures",
     "docs",
     "README.md"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "doctor": "node src/cli.ts doctor",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
     "smoke": "node src/cli.ts smoke",
     "pilot": "node src/cli.ts",
     "test": "node --test tests/*.test.ts"
@@ -30,5 +33,9 @@
   "engines": {
     "node": ">=22.18"
   },
-  "packageManager": "npm@11.9.0"
+  "packageManager": "npm@11.9.0",
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^5.9.3"
+  }
 }
