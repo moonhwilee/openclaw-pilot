@@ -1,6 +1,6 @@
 {
   "name": "openclaw-pilot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "doctor": "node src/cli.ts doctor",
-    "prepare": "npm run build",
     "prepack": "npm run build",
     "smoke": "node src/cli.ts smoke",
     "pilot": "node src/cli.ts",
