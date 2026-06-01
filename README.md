@@ -13,7 +13,7 @@ in `docs/pilotlead-v0.2.8-product-contract.md`.
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.7
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.8
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
