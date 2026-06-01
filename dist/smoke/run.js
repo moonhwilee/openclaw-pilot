@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runConv } from "../conv/run.js";
+import { executionPlanArtifactName, hashExecutionPlan, readExecutionPlan } from "../execution-plan.js";
 import { runGoal } from "../goal/run.js";
 import { runLiveAdapter } from "../live-adapter/run.js";
 import { runPlan } from "../plan/run.js";
 import { runRoute } from "../route/run.js";
+import { validateExecutionPlan } from "../schema/index.js";
 import { runVerify } from "../verify/run.js";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 async function check(name, fn) {
@@ -27,6 +29,23 @@ export async function runSmoke() {
             const result = await runPlan({ request: "Draft a local document strategy plan.", stateRoot });
             if (result.status !== "completed_plan")
                 throw new Error(`unexpected status: ${result.status}`);
+        }),
+        check("execution_plan_contract", async () => {
+            const result = await runPlan({ request: "Draft a local execution plan contract smoke check.", stateRoot });
+            if (result.status !== "completed_plan")
+                throw new Error(`unexpected status: ${result.status}`);
+            const executionPlanPath = join(result.artifact_dir, executionPlanArtifactName);
+            const executionPlan = await readExecutionPlan(executionPlanPath);
+            const errors = validateExecutionPlan(executionPlan);
+            if (errors.length > 0)
+                throw new Error(`invalid execution plan: ${errors.join("; ")}`);
+            if (executionPlan.plan_run_id !== result.run_id)
+                throw new Error("execution plan run id mismatch");
+            if (hashExecutionPlan(executionPlan) !== executionPlan.approval_subject_hash) {
+                throw new Error("execution plan hash mismatch");
+            }
+            if (executionPlan.steps.length === 0)
+                throw new Error("execution plan has no steps");
         }),
         check("verify", async () => {
             const result = await runVerify({
