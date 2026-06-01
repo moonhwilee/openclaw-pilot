@@ -1,4 +1,5 @@
-import type { CommonPlanContract, RunStatus } from "../types.ts";
+import { withExecutionPlanHash } from "../execution-plan.ts";
+import type { CommonPlanContract, ExecutionPlan, RunStatus } from "../types.ts";
 
 const vagueRequests = new Set(["도와줘", "해줘", "help", "help me", "뭔가 해줘", "알아서 해줘"]);
 
@@ -80,4 +81,139 @@ export function buildPlan(request: string): { status: RunStatus; ambiguityQuesti
   };
 
   return { status, ambiguityQuestions, plan };
+}
+
+function selectsPilotReceiptsDashboardStep(request: string): boolean {
+  const normalized = request.toLowerCase();
+  return normalized.includes("dashboard") && normalized.includes("receipt");
+}
+
+function hasLocalFileReference(request: string): boolean {
+  return /(?:^|\s)(?:\/Users\/\S+|\/tmp\/\S+|\.{1,2}\/\S+|\S+\/\S+\.[A-Za-z0-9]{1,12})(?:\s|$|[.,;:!?")\]])/.test(
+    request,
+  );
+}
+
+function asksToMutateLocalFile(request: string): boolean {
+  const normalized = request.toLowerCase();
+  const mutationTokens = [
+    "create",
+    "write",
+    "save",
+    "generate",
+    "make",
+    "update",
+    "modify",
+    "edit",
+    "append",
+    "replace",
+    "touch",
+    "생성",
+    "작성",
+    "저장",
+    "수정",
+    "추가",
+    "교체",
+  ];
+  return hasLocalFileReference(request) && mutationTokens.some((token) => normalized.includes(token));
+}
+
+function requiresCodexRunner(request: string): boolean {
+  const normalized = request.toLowerCase();
+  return asksToMutateLocalFile(request) || [
+    "implement",
+    "code",
+    "fix",
+    "test",
+    "refactor",
+    "runner",
+    "codex",
+    "session",
+    "구현",
+    "수정",
+    "테스트",
+    "리팩터",
+  ].some((token) => normalized.includes(token));
+}
+
+export function buildExecutionPlan(request: string, planRunId: string): ExecutionPlan | undefined {
+  if (requestLooksVague(request)) return undefined;
+
+  const capability = selectsPilotReceiptsDashboardStep(request)
+    ? "create_pilot_receipts_dashboard"
+    : requiresCodexRunner(request)
+      ? "run_codex_session"
+      : "create_artifact";
+  const riskClass = capability === "run_codex_session" ? "high" : "low";
+  const scope =
+    capability === "run_codex_session"
+      ? [
+          `Execute only the concrete work described by plan run ${planRunId}.`,
+          "Edit files, run checks, and collect results only within the approved plan boundary.",
+          "Stop before any external action, deploy, release, payment, credential access, or destructive filesystem action.",
+        ]
+      : capability === "create_pilot_receipts_dashboard"
+        ? [
+            `Create a local Pilot receipts dashboard for plan run ${planRunId}.`,
+            "Read local Pilot receipt artifacts as source data.",
+            "Write only inside the new goal run artifact directory.",
+          ]
+        : [
+            `Create a bounded local goal artifact for plan run ${planRunId}.`,
+            "Write only inside the new goal run artifact directory.",
+          ];
+
+  return withExecutionPlanHash({
+    schema_version: "pilot.execution_plan.v0",
+    plan_run_id: planRunId,
+    goal_summary: request.trim(),
+    steps: [
+      {
+        id: "step-1",
+        capability,
+        risk_class: riskClass,
+        scope,
+        inputs: {
+          plan_run_id: planRunId,
+          request,
+        },
+        expected_artifacts:
+          capability === "run_codex_session"
+            ? ["runner-prompt.md", "runner-result.json", "runner-stdout.txt", "runner-stderr.txt"]
+            : capability === "create_pilot_receipts_dashboard"
+              ? ["pilot-receipts-dashboard.html"]
+              : ["step-1-goal-artifact.md"],
+        verification_gates:
+          capability === "run_codex_session"
+            ? [
+                "runner-result.json exists",
+                "runner exit code is 0",
+                "receipts.jsonl contains pilot.receipt.v0 for run_codex_session",
+              ]
+            : [
+                "expected local artifact exists",
+                `receipts.jsonl contains pilot.receipt.v0 for ${capability}`,
+              ],
+        stop_conditions: ["success_criteria_met", "approval_boundary_hit"],
+      },
+    ],
+    forbidden_actions: [
+      "external_message",
+      "public_post",
+      "payment",
+      "credential_access",
+      "server_restart",
+      "deploy",
+      "release",
+      "pr_merge",
+      "destructive_filesystem",
+      "out_of_plan_action",
+    ],
+    requires_reapproval_if: [
+      "Execution requires capability not listed in this execution plan.",
+      "Execution requires mutating files outside the approved plan boundary.",
+      "Execution requires external messages, public posts, payments, credentials, deploys, releases, restarts, or merges.",
+      "Execution needs a different risk class, scope, or artifact target than the approved execution plan.",
+    ],
+  });
 }

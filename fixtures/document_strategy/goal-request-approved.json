@@ -52,7 +52,9 @@
     ],
     "approved_capabilities": [
       "create_artifact"
-    ]
+    ],
+    "execution_plan_ref": "fixture-execution-plan.json",
+    "execution_plan_hash": "4886832b30822caea1954e9bc785a78787eb5cde81c7c04741ec50fd7a08c5e9"
   },
   "preflight": {
     "risk_class": "low",
@@ -75,5 +77,48 @@
       "success_criteria_met",
       "approval_boundary_hit"
     ]
+  },
+  "execution_plan": {
+    "schema_version": "pilot.execution_plan.v0",
+    "plan_run_id": "local-fixture-approval-001",
+    "goal_summary": "Create a bounded local document strategy execution artifact.",
+    "steps": [
+      {
+        "id": "step-1",
+        "capability": "create_artifact",
+        "risk_class": "low",
+        "scope": [
+          "Create one local run artifact that summarizes the document strategy goal."
+        ],
+        "inputs": {
+          "fixture": true
+        },
+        "expected_artifacts": [
+          "step-1-goal-artifact.md"
+        ],
+        "verification_gates": [
+          "goal-run.json exists",
+          "receipts.jsonl records execution"
+        ],
+        "stop_conditions": [
+          "success_criteria_met",
+          "approval_boundary_hit"
+        ]
+      }
+    ],
+    "forbidden_actions": [
+      "external_message",
+      "payment",
+      "credential_access",
+      "server_restart",
+      "destructive_filesystem",
+      "deploy",
+      "pr_merge",
+      "release"
+    ],
+    "requires_reapproval_if": [
+      "Execution requires a capability, scope, or risk class outside this execution plan."
+    ],
+    "approval_subject_hash": "4886832b30822caea1954e9bc785a78787eb5cde81c7c04741ec50fd7a08c5e9"
   }
 }

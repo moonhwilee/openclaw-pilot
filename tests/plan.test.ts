@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/plan/run.ts";
-import { validateCommonPlanContract, validateEventRecord, validateGoalArtifact } from "../src/schema/index.ts";
+import { validateCommonPlanContract, validateEventRecord, validateExecutionPlan, validateGoalArtifact } from "../src/schema/index.ts";
 import { isPhase1TerminalStatus } from "../src/state/index.ts";
 import type { CommonPlanContract } from "../src/types.ts";
 
@@ -31,8 +31,8 @@ test("runPlan creates the four v0 artifacts and completes without execution", as
   });
 
   assert.equal(result.status, "completed_plan");
-  assert.equal(result.created_files.length, 5);
-  for (const file of ["goal.json", "plan.md", "events.jsonl", "final.md", "lineage.jsonl"]) {
+  assert.equal(result.created_files.length, 6);
+  for (const file of ["goal.json", "plan.md", "execution-plan.json", "events.jsonl", "final.md", "lineage.jsonl"]) {
     assert.equal(await fileExists(join(result.artifact_dir, file)), true, `${file} should exist`);
   }
   assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
@@ -55,6 +55,8 @@ test("runPlan creates the four v0 artifacts and completes without execution", as
   }
   assert.equal(await fileExists(join(result.artifact_dir, "approval.json")), false);
   assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), false);
+  const executionPlan = JSON.parse(await readFile(join(result.artifact_dir, "execution-plan.json"), "utf8"));
+  assert.deepEqual(validateExecutionPlan(executionPlan), []);
 });
 
 test("vague request ends in needs_user_decision and records ambiguity", async () => {

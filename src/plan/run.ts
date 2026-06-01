@@ -2,12 +2,13 @@ import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { DEFAULT_PROFILE, defaultStateRoot } from "../config.ts";
 import { createRunId, eventLine, prepareRunDirectory, renderFinalMarkdown, renderPlanMarkdown, writeJson } from "../artifacts.ts";
-import { validateCommonPlanContract, validateGoalArtifact } from "../schema/index.ts";
+import { executionPlanArtifactName } from "../execution-plan.ts";
+import { validateCommonPlanContract, validateExecutionPlan, validateGoalArtifact } from "../schema/index.ts";
 import { isPhase1TerminalStatus } from "../state/index.ts";
 import { appendLineageRecord } from "../state/lineage.ts";
 import { shortRunId } from "../state/run-index.ts";
 import type { EventRecord, GoalArtifact, PlanResult } from "../types.ts";
-import { buildPlan } from "./generate.ts";
+import { buildExecutionPlan, buildPlan } from "./generate.ts";
 
 export type RunPlanOptions = {
   request: string;
@@ -51,6 +52,14 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
   if (goalValidationErrors.length > 0) {
     throw new Error(`generated goal failed validation: ${goalValidationErrors.join("; ")}`);
   }
+  const executionPlan = status === "completed_plan" ? buildExecutionPlan(request, runId) : undefined;
+  if (status === "completed_plan" && !executionPlan) {
+    throw new Error("completed plan did not produce an execution plan");
+  }
+  const executionPlanValidationErrors = executionPlan ? validateExecutionPlan(executionPlan) : [];
+  if (executionPlanValidationErrors.length > 0) {
+    throw new Error(`generated execution plan failed validation: ${executionPlanValidationErrors.join("; ")}`);
+  }
 
   const events: EventRecord[] = [
     {
@@ -65,7 +74,7 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
       run_id: runId,
       event: "plan_created",
       status,
-      details: { execution: "not_performed" },
+      details: { execution: "not_performed", execution_plan: executionPlan ? executionPlanArtifactName : "not_created" },
     },
     {
       timestamp: createdAt,
@@ -79,14 +88,17 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
   const files = {
     goal: join(artifactDir, "goal.json"),
     plan: join(artifactDir, "plan.md"),
+    executionPlan: executionPlan ? join(artifactDir, executionPlanArtifactName) : undefined,
     events: join(artifactDir, "events.jsonl"),
     final: join(artifactDir, "final.md"),
   };
 
   await writeJson(files.goal, goal);
   await writeFile(files.plan, renderPlanMarkdown(plan), "utf8");
+  if (files.executionPlan && executionPlan) await writeJson(files.executionPlan, executionPlan);
   await writeFile(files.events, events.map(eventLine).join(""), "utf8");
   await writeFile(files.final, renderFinalMarkdown(goal), "utf8");
+  const createdFiles = Object.values(files).filter((file): file is string => Boolean(file));
   const lineage = await appendLineageRecord(stateRoot, {
     schema_version: "pilot.lineage.v0",
     created_at: createdAt,
@@ -97,7 +109,7 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
     status,
     state_root: stateRoot,
     artifact_dir: artifactDir,
-    evidence_pointers: Object.values(files),
+    evidence_pointers: createdFiles,
     resume_hint:
       status === "completed_plan"
         ? `Review the plan, then approve ${shortRunId(runId)} if it should execute.`
@@ -114,6 +126,6 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
     artifact_dir: artifactDir,
     goal,
     plan,
-    created_files: [...Object.values(files), lineage.run_path],
+    created_files: [...createdFiles, lineage.run_path],
   };
 }

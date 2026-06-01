@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { resolveApprovalTarget } from "../approval/run.js";
 import { writeJson } from "../artifacts.js";
 import { resumeConvFromCheckpoint, runConv } from "../conv/run.js";
+import { executionPlanArtifactName, executionPlanCapabilities, executionPlanRiskClass, executionPlanScope, readExecutionPlan, } from "../execution-plan.js";
 import { buildPostConvergenceEvidencePacket, buildPostExecutionConvRequest, buildPostExecutionEvidencePacket, fixableVerificationVerdict, } from "../goal/post-execution.js";
 import { runGoal } from "../goal/run.js";
 import { runPlan } from "../plan/run.js";
@@ -380,7 +381,7 @@ async function resolveResumeCheckpoint(stateRoot, run) {
     }
     const approval = await resolveApprovalEntry(stateRoot, run.run_id);
     if (approval.status === "found") {
-        const requestPath = await writeApprovedGoalRequest(approval.entry, undefined);
+        const requestPath = await writeApprovedExecutionRequest(approval.entry, undefined);
         return {
             phase: "execute",
             resumable: true,
@@ -698,163 +699,72 @@ function assertApprovalScope(entry, metadata) {
     }
     return risks;
 }
-function approvedPlanContract(entry, goal) {
-    if (entry.approved_capabilities.includes("run_codex_session")) {
-        return {
-            goal: `Execute approved Codex/session work for Pilot plan run ${entry.short_run_id}.`,
-            scope: entry.approved_scope,
-            out_of_scope: [
-                "Actions outside the approved plan",
-                "External public posts or third-party messages unless the approved plan explicitly names them",
-                "Payments or irreversible account changes unless the approved plan explicitly names them",
-            ],
-            success_criteria: [
-                "A runner prompt artifact exists.",
-                "The approved Codex/session runner completes with exit code 0.",
-                "Runner stdout/stderr and result metadata are captured as artifacts.",
-                "A typed receipt records the run_codex_session capability.",
-                `The execution references approved plan run ${entry.run_id}.`,
-            ],
-            risks_assumptions: [
-                "The runner operates only within the approved plan boundary.",
-                "The runner must stop and report if it needs out-of-plan work.",
-                `Original request: ${goal.request}`,
-            ],
-            action_boundaries: {
-                allowed_actions: ["run_codex_session"],
-                approval_required_actions: ["execute the approved Codex/session runner task"],
-                disallowed_actions: ["out_of_plan_action", "vague_broad_authority", "unreported_external_action"],
-            },
-            verification_gates: [
-                "runner-result.json exists",
-                "runner-stdout.txt exists",
-                "runner-stderr.txt exists",
-                "receipts.jsonl contains pilot.receipt.v0 for run_codex_session",
-                `approval reference equals ${entry.run_id}`,
-            ],
-            next_recommended_step: "Inspect runner-result.json, stdout/stderr, and the final report.",
-        };
-    }
-    if (entry.approved_capabilities.includes("create_pilot_receipts_dashboard")) {
-        return {
-            goal: `Create a local Pilot receipts dashboard prototype for approved plan run ${entry.short_run_id}.`,
-            scope: entry.approved_scope,
-            out_of_scope: [
-                "External messages",
-                "Network calls",
-                "Server startup",
-                "Telegram routing side effects",
-                "Agent spawning",
-                "Filesystem mutation outside the new goal run artifact directory",
-            ],
-            success_criteria: [
-                "A new local goal-run artifact directory exists.",
-                "A self-contained HTML dashboard prototype exists in that directory.",
-                "The dashboard includes local Pilot receipt data summarized from receipts.jsonl artifacts.",
-                "A typed receipt records the create_pilot_receipts_dashboard capability.",
-                `The execution references approved plan run ${entry.run_id}.`,
-            ],
-            risks_assumptions: [
-                "This is a local static prototype, not a running web app or deployed service.",
-                "Receipt data is read from the local Pilot state directory and embedded into the generated artifact.",
-                `Original request: ${goal.request}`,
-            ],
-            action_boundaries: {
-                allowed_actions: ["create_pilot_receipts_dashboard"],
-                approval_required_actions: ["create a local Pilot receipts dashboard prototype for the approved plan run"],
-                disallowed_actions: [
-                    "external_message",
-                    "network_call",
-                    "shell_escape",
-                    "telegram_routing",
-                    "agent_spawn",
-                    "deploy",
-                    "release",
-                    "server_restart",
-                    "destructive_filesystem",
-                ],
-            },
-            verification_gates: [
-                "goal-run.json exists",
-                "pilot-receipts-dashboard.html exists",
-                "receipts.jsonl contains pilot.receipt.v0 for create_pilot_receipts_dashboard",
-                `approval reference equals ${entry.run_id}`,
-            ],
-            next_recommended_step: "Open the generated dashboard HTML locally and inspect the receipt summary.",
-        };
-    }
+function approvedPlanContract(entry, goal, capabilities, scope) {
     return {
-        goal: `Execute approved local scoped flow for Pilot plan run ${entry.short_run_id}.`,
-        scope: entry.approved_scope,
+        goal: `Execute approved execution_plan for Pilot plan run ${entry.short_run_id}.`,
+        scope,
         out_of_scope: [
-            "External messages",
-            "Shell execution",
-            "Telegram routing side effects",
-            "Agent spawning",
-            "Filesystem mutation outside the new goal run artifact directory",
+            "Actions outside the approved execution_plan.",
+            "Capabilities not listed in execution_plan.steps.",
+            "External public posts, third-party messages, payments, credential access, deploys, releases, restarts, or merges unless a new approved execution_plan explicitly authorizes them.",
         ],
         success_criteria: [
             "A new local goal-run artifact directory exists.",
-            "A scoped local goal artifact exists.",
-            "A typed receipt records the create_artifact capability.",
+            "Only execution_plan.steps are executed.",
+            "Typed receipts record execution_step_id for every completed step.",
             `The execution references approved plan run ${entry.run_id}.`,
         ],
         risks_assumptions: [
-            "This flow validates approval continuity and local receipt creation only.",
-            "It does not execute the user's original task semantics.",
+            "execution_plan is the single authorization object.",
+            "plan.md is explanatory and cannot authorize execution by prose.",
             `Original request: ${goal.request}`,
         ],
         action_boundaries: {
-            allowed_actions: ["create_artifact"],
-            approval_required_actions: ["create local goal artifact for the approved Pilot plan run"],
-            disallowed_actions: [
-                "external_message",
-                "shell_escape",
-                "telegram_routing",
-                "agent_spawn",
-                "deploy",
-                "release",
-                "server_restart",
-                "destructive_filesystem",
-            ],
+            allowed_actions: capabilities,
+            approval_required_actions: ["execute only the approved execution_plan steps"],
+            disallowed_actions: ["out_of_plan_action", "vague_broad_authority", "unreported_external_action"],
         },
         verification_gates: [
             "goal-run.json exists",
-            "step-1-goal-artifact.md exists",
-            "receipts.jsonl contains pilot.receipt.v0",
+            "receipts.jsonl contains pilot.receipt.v0 with execution_step_id",
             `approval reference equals ${entry.run_id}`,
+            `execution_plan hash equals ${entry.execution_plan_hash || "missing"}`,
         ],
-        next_recommended_step: "Inspect the goal-run artifact and receipt before widening execution behavior.",
+        next_recommended_step: "Inspect goal-run.json, receipts, and final.md.",
     };
 }
-async function writeApprovedGoalRequest(entry, metadata) {
+async function writeApprovedExecutionRequest(entry, metadata) {
     const scopeRisks = assertApprovalScope(entry, metadata);
     if (scopeRisks.length > 0)
         throw new Error(scopeRisks.join(" "));
     const goal = await readPlanGoal(entry);
-    const createsDashboard = entry.approved_capabilities.includes("create_pilot_receipts_dashboard");
-    const runsSession = entry.approved_capabilities.includes("run_codex_session");
+    const executionPlanPath = entry.execution_plan_ref || join(entry.artifact_dir, executionPlanArtifactName);
+    const executionPlan = await readExecutionPlan(executionPlanPath);
+    if (!entry.execution_plan_hash || executionPlan.approval_subject_hash !== entry.execution_plan_hash) {
+        throw new Error("approved execution_plan hash mismatch");
+    }
+    const capabilities = executionPlanCapabilities(executionPlan);
+    const scope = executionPlanScope(executionPlan);
+    const riskClass = executionPlanRiskClass(executionPlan);
     const request = {
         schema_version: "pilot.goal_request.v0",
         goal: {
             id: `approved-${entry.short_run_id}`,
-            statement: runsSession
-                ? `Execute approved Codex/session work for Pilot plan run ${entry.short_run_id}: ${goal.request}`
-                : createsDashboard
-                    ? `Create a local Pilot receipts dashboard prototype for approved Pilot plan run ${entry.short_run_id}: ${goal.request}`
-                    : `Create a bounded local goal artifact for approved Pilot plan run ${entry.short_run_id}: ${goal.request}`,
+            statement: `Execute approved execution_plan for Pilot plan run ${entry.short_run_id}: ${goal.request}`,
             profile: goal.profile,
         },
-        plan: approvedPlanContract(entry, goal),
+        plan: approvedPlanContract(entry, goal, capabilities, scope),
         approval: {
             reference: entry.run_id,
             approved: true,
-            approved_scope: entry.approved_scope,
-            approved_capabilities: entry.approved_capabilities,
+            approved_scope: scope,
+            approved_capabilities: capabilities,
+            execution_plan_ref: executionPlanPath,
+            execution_plan_hash: entry.execution_plan_hash,
         },
         preflight: {
-            risk_class: runsSession ? "high" : "low",
-            typed_capabilities: entry.approved_capabilities,
+            risk_class: riskClass,
+            typed_capabilities: capabilities,
             dangerous_action_gates: [
                 "external_message",
                 "payment",
@@ -869,8 +779,9 @@ async function writeApprovedGoalRequest(entry, metadata) {
             max_rounds: 1,
             stop_conditions: ["success_criteria_met", "approval_boundary_hit"],
         },
+        execution_plan: executionPlan,
     };
-    const requestPath = join(entry.artifact_dir, "approved-goal-request.json");
+    const requestPath = join(entry.artifact_dir, "approved-execution-request.json");
     await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
     return requestPath;
 }
@@ -1114,7 +1025,7 @@ export async function runRoute(options) {
                     user_report: userReport("approval_record_missing", result.evidence_pointers, ["Approval target was validated, but the approval record could not be resolved for execution."], `Retry approve ${entry.short_run_id}, or inspect the approval index before running /goal ${entry.short_run_id}.`),
                 };
             }
-            const requestPath = await writeApprovedGoalRequest(approvalResolution.entry, options.metadata);
+            const requestPath = await writeApprovedExecutionRequest(approvalResolution.entry, options.metadata);
             const goalResult = await runGoal({ requestPath });
             return {
                 schema_version: "pilot.route.v0",
@@ -1275,7 +1186,7 @@ export async function runRoute(options) {
                 user_report: userReport("approval_cancelled", [resolution.entry.artifact_dir], [`Approved run ${resolution.entry.short_run_id} has been cancelled.`], "Create a new /plan or /goal if the work should continue."),
             };
         }
-        requestPath = await writeApprovedGoalRequest(resolution.entry, options.metadata);
+        requestPath = await writeApprovedExecutionRequest(resolution.entry, options.metadata);
         approvalReference = resolution.entry.run_id;
     }
     else if (!looksLikeGoalRequestPath(parsed.rest)) {
