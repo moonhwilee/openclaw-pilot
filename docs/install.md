@@ -7,16 +7,18 @@ Current workspace roadmap and TODO live at
 
 ## Quick Install
 
+Install from the current GitHub release tag:
+
 ```bash
-npm install -g openclaw-pilot
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.0
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
 
-Before npm publishing, install from a GitHub release tag:
+After npm publishing, the install command will be:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.1.3
+npm install -g openclaw-pilot
 pilot init
 pilot plan "Draft a document strategy plan"
 ```

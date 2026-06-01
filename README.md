@@ -7,18 +7,18 @@ Current workspace roadmap and TODO are tracked in
 
 ## Install
 
-From npm, once published:
+From the current GitHub release:
 
 ```bash
-npm install -g openclaw-pilot
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.0
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
 
-From GitHub before npm publishing:
+After the package is published to npm, the install command will be:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.1.3
+npm install -g openclaw-pilot
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
