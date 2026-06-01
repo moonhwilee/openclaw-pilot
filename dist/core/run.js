@@ -35,13 +35,21 @@ function formatRouteReply(route) {
     const usage = typeof route.result_summary?.usage === "string" ? route.result_summary.usage : undefined;
     const example = typeof route.result_summary?.example === "string" ? route.result_summary.example : undefined;
     const planPreview = stringList(route.result_summary?.plan_preview);
+    const progress = stringList(report.progress);
     const runId = typeof route.result_summary?.run_id === "string" ? route.result_summary.run_id : undefined;
     const shortRunId = typeof route.result_summary?.short_run_id === "string" ? route.result_summary.short_run_id : undefined;
-    const lifecycle = route.result_summary?.lifecycle &&
+    const directLifecycle = route.result_summary?.lifecycle &&
         typeof route.result_summary.lifecycle === "object" &&
         !Array.isArray(route.result_summary.lifecycle)
         ? route.result_summary.lifecycle
         : undefined;
+    const runSummary = route.result_summary?.run && typeof route.result_summary.run === "object" && !Array.isArray(route.result_summary.run)
+        ? route.result_summary.run
+        : undefined;
+    const runLifecycle = runSummary?.lifecycle && typeof runSummary.lifecycle === "object" && !Array.isArray(runSummary.lifecycle)
+        ? runSummary.lifecycle
+        : undefined;
+    const lifecycle = directLifecycle || runLifecycle;
     const currentPhase = typeof lifecycle?.current_phase === "string" ? lifecycle.current_phase : undefined;
     const terminalStatus = typeof lifecycle?.terminal_status === "string" ? lifecycle.terminal_status : undefined;
     const lines = [
@@ -51,6 +59,7 @@ function formatRouteReply(route) {
         ...(terminalStatus ? [`Terminal: ${terminalStatus}`] : []),
         `Command: ${route.command}`,
         ...(runId ? [`Run: ${shortRunId || runId}`, ...(shortRunId ? [`Run ID: ${runId}`] : [])] : []),
+        ...(progress.length ? ["", "Progress", ...bulletLines(progress)] : []),
         ...(usage ? ["", "Usage", `- ${usage}`, ...(example ? ["", "Example", `- ${example}`] : [])] : []),
         ...(planPreview.length ? ["", "Plan", ...bulletLines(planPreview)] : []),
         ...(report.approval_preview?.length ? ["", "Approval", ...bulletLines(report.approval_preview)] : []),

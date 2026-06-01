@@ -8,6 +8,7 @@ import type {
   GoalRunResult,
   VerificationResult,
 } from "./types.ts";
+import { progressLinesForConv, progressLinesForGoal, progressLinesForVerification } from "./progress.ts";
 
 export function slugifyRequest(request: string): string {
   const slug = request
@@ -154,6 +155,10 @@ export function renderVerificationMarkdown(result: VerificationResult): string {
     `Claim: ${result.packet.claim.statement}`,
     `Specialized Reviewers: ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required}`,
     "",
+    "Progress Snapshot:",
+    "",
+    ...progressLinesForVerification(result).map((line) => `- ${line}`),
+    "",
     "Findings:",
     "",
     ...result.findings.map((finding) => `- ${finding.severity}: ${finding.code} - ${finding.message}`),
@@ -171,6 +176,10 @@ export function renderConvMarkdown(result: ConvResult): string {
     `Status: ${result.status}`,
     `Run ID: ${result.run_id}`,
     `Anchor: ${result.anchor.id}`,
+    "",
+    "Progress Snapshot:",
+    "",
+    ...progressLinesForConv(result).map((line) => `- ${line}`),
     "",
     "Findings:",
     "",
@@ -220,6 +229,10 @@ export function renderGoalRunMarkdown(result: GoalRunResult): string {
       : []),
     `Run ID: ${result.run_id}`,
     `Goal: ${result.request.goal.statement}`,
+    "",
+    "Progress Snapshot:",
+    "",
+    ...progressLinesForGoal(result).map((line) => `- ${line}`),
     "",
     ...(lifecycle
       ? [

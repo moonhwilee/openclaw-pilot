@@ -18,6 +18,12 @@ import {
 } from "../goal/post-execution.ts";
 import { runGoal } from "../goal/run.ts";
 import { runPlan } from "../plan/run.ts";
+import {
+  progressLinesForConv,
+  progressLinesForGoal,
+  progressLinesForRecovery,
+  progressLinesForVerification,
+} from "../progress.ts";
 import { profileExpectationSummary } from "../profiles/index.ts";
 import { resolveApprovalEntry } from "../state/approval-index.ts";
 import {
@@ -63,11 +69,13 @@ function userReport(
   remainingRisks: string[],
   nextAction: string,
   approvalPreview?: string[],
+  progress?: string[],
 ): RouteUserReport {
   const uniqueEvidencePointers = [...new Set(evidencePointers)];
   const uniqueRemainingRisks = [...new Set(remainingRisks)];
   return {
     status,
+    ...(progress?.length ? { progress: [...new Set(progress)] } : {}),
     ...(approvalPreview?.length ? { approval_preview: [...new Set(approvalPreview)] } : {}),
     evidence_pointers: uniqueEvidencePointers,
     remaining_risks: uniqueRemainingRisks.length > 0 ? uniqueRemainingRisks : ["none"],
@@ -391,6 +399,16 @@ async function readConvCheckpointIfExists(artifactDir: string): Promise<ConvChec
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+async function recoveryProgressLines(run: PilotRecoveryRunStatus): Promise<string[]> {
+  const [goalRun, convCheckpoint, convResult, verification] = await Promise.all([
+    readGoalRunIfExists(run.artifact_dir),
+    readConvCheckpointIfExists(run.artifact_dir),
+    readConvResultIfExists(run.artifact_dir),
+    readVerificationResultIfExists(run.artifact_dir),
+  ]);
+  return progressLinesForRecovery(run, { goalRun, convCheckpoint, convResult, verification });
 }
 
 async function writeResumeLock(run: PilotRecoveryRunStatus, checkpoint: ResumeCheckpoint): Promise<
@@ -1066,6 +1084,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
       };
     }
     const run = resolution.run;
+    const progress = await recoveryProgressLines(run);
     return {
       schema_version: "pilot.route.v0",
       status: run.status === "blocked" ? "blocked" : "routed",
@@ -1081,6 +1100,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         [...run.available_artifacts, ...run.evidence_pointers, ...run.receipt_pointers],
         recoveryStatusRisks(run),
         run.lifecycle?.next_action || run.resume_hint,
+        undefined,
+        progress,
       ),
     };
   }
@@ -1314,6 +1335,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
           [...result.evidence_pointers, ...goalResult.created_files],
           findingRisks(goalResult.findings),
           goalNextAction(goalResult),
+          undefined,
+          progressLinesForGoal(goalResult),
         ),
       };
     }
@@ -1410,6 +1433,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
           ? "Use the verification artifact as the evidence pointer for the next step."
           : "Revise the evidence packet or run /conv against the listed findings.",
+        undefined,
+        progressLinesForVerification(result),
       ),
     };
   }
@@ -1437,6 +1462,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         result.status === "completed"
           ? "Run /verify with the updated evidence packet when a final verdict is needed."
           : "Provide a tighter anchor, safer capability boundary, or more rounds before retrying /conv.",
+        undefined,
+        progressLinesForConv(result),
       ),
     };
   }
@@ -1557,6 +1584,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
       result.created_files,
       findingRisks(result.findings),
       goalNextAction(result),
+      undefined,
+      progressLinesForGoal(result),
     ),
   };
 }

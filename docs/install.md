@@ -10,7 +10,7 @@ Current workspace roadmap and TODO live at
 Install from the current GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.8
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.9
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -117,6 +117,13 @@ Telegram text now distinguish terminal states such as `completed_verified`,
 `completed_after_convergence`, `completed_with_risks`, `needs_user_decision`,
 and `blocked`, and include a phase marker for the latest visible lifecycle
 point.
+
+When a command has meaningful long-running state, route/live/Telegram replies
+also include a compact Progress section. The snapshot favors user-actionable
+signals over raw telemetry: current goal milestone where known, lifecycle
+phase, convergence round count, semantic reviewer count, P0-P3 finding counts,
+and the next action. Subagent or response counts should only appear when that
+runtime is actually used and can be measured accurately.
 
 ## Gateway And Telegram
 
