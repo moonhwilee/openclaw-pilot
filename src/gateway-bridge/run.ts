@@ -29,7 +29,17 @@ export type RunGatewayBridgeOptions = {
 };
 
 const defaultTimeoutMs = 2500;
-const exactCommands = new Set<RouteResult["command"]>(["/plan", "/verify", "/conv", "/goal", "approve"]);
+const exactCommands = new Set<RouteResult["command"]>([
+  "/plan",
+  "/verify",
+  "/conv",
+  "/goal",
+  "approve",
+  "list",
+  "status",
+  "resume",
+  "cancel",
+]);
 
 function startedAt(): bigint {
   return process.hrtime.bigint();
