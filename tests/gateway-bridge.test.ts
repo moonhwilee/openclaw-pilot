@@ -118,6 +118,92 @@ test("Gateway bridge routes enabled plan through the Telegram adapter", async ()
   }
 });
 
+test("Gateway bridge routes enabled recovery commands", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  try {
+    const plan = await runGatewayBridge({
+      message: {
+        text: "/plan Draft a recovery bridge smoke plan.",
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23025",
+        update_id: "99006",
+        timestamp: "2026-06-01T04:04:00+09:00",
+        chat_type: "direct",
+        trusted_openclaw_sender: true,
+      },
+      gate: {
+        liveRoutingEnabled: true,
+        enabledCommands: ["/plan", "list", "status", "resume", "cancel"],
+        trustOpenClawSender: true,
+      },
+    });
+
+    assert.equal(plan.status, "routed");
+    assert.equal(plan.route?.command, "/plan");
+    assert.deepEqual(plan.enabled_commands, ["/plan", "list", "status", "resume", "cancel", "approve"]);
+
+    const shortRunId = String(plan.route?.result_summary?.short_run_id || "");
+    assert.match(shortRunId, /^\d{6}$/);
+
+    const list = await runGatewayBridge({
+      message: {
+        text: "list 5",
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23026",
+        update_id: "99007",
+        timestamp: "2026-06-01T04:05:00+09:00",
+        chat_type: "direct",
+        trusted_openclaw_sender: true,
+      },
+      gate: {
+        liveRoutingEnabled: true,
+        enabledCommands: ["list"],
+        trustOpenClawSender: true,
+      },
+    });
+
+    assert.equal(list.status, "routed");
+    assert.deepEqual(list.enabled_commands, ["list"]);
+    assert.equal(list.route?.command, "list");
+    assert.equal(list.route?.user_report.status, "recovery_list");
+    assert.match(list.telegram_text, new RegExp(shortRunId));
+
+    const status = await runGatewayBridge({
+      message: {
+        text: `status ${shortRunId}`,
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23027",
+        update_id: "99008",
+        timestamp: "2026-06-01T04:06:00+09:00",
+        chat_type: "direct",
+        trusted_openclaw_sender: true,
+      },
+      gate: {
+        liveRoutingEnabled: true,
+        enabledCommands: ["status"],
+        trustOpenClawSender: true,
+      },
+    });
+
+    assert.equal(status.status, "routed");
+    assert.deepEqual(status.enabled_commands, ["status"]);
+    assert.equal(status.route?.command, "status");
+    assert.equal(status.route?.result_summary?.status, "recovery_status");
+    assert.equal(status.route?.user_report.status, "completed_plan");
+    assert.match(status.telegram_text, /Status: completed_plan/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("Gateway bridge keeps non-enabled commands unavailable behind an enabled gate", async () => {
   const result = await runGatewayBridge({
     message: {

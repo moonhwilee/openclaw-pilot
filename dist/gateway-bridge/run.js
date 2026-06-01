@@ -1,7 +1,17 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { runTelegramAdapter } from "../telegram-adapter/run.js";
 const defaultTimeoutMs = 2500;
-const exactCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve"]);
+const exactCommands = new Set([
+    "/plan",
+    "/verify",
+    "/conv",
+    "/goal",
+    "approve",
+    "list",
+    "status",
+    "resume",
+    "cancel",
+]);
 function startedAt() {
     return process.hrtime.bigint();
 }
