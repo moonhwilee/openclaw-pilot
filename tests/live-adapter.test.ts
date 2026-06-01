@@ -42,6 +42,24 @@ test("live adapter formats enabled plan route as Telegram-safe text", async () =
   assert.ok(output.telegram_text.length < 4000);
 });
 
+test("live adapter shows usage for empty Pilot slash commands", () => {
+  for (const command of ["/plan", "/goal", "/verify", "/conv"] as const) {
+    const result = spawnSync(process.execPath, ["src/cli.ts", "live", `--enabled=${command}`, command], {
+      cwd: new URL("..", import.meta.url),
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, `${command}: ${result.stderr}`);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.route.status, "needs_user_decision");
+    assert.equal(output.route.command, command);
+    assert.match(output.telegram_text, /Status: command_needs_input/);
+    assert.match(output.telegram_text, /Usage/);
+    assert.match(output.telegram_text, /Example/);
+    assert.doesNotMatch(output.telegram_text, /Pilot command failed/);
+  }
+});
+
 test("live adapter preserves goal approval wait in Telegram text", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "live", "--enabled=/goal", "/goal fixtures/document_strategy/goal-request-draft.json"], {
     cwd: new URL("..", import.meta.url),

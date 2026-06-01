@@ -153,6 +153,32 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
   }
 });
 
+test("Telegram adapter shows usage for empty Pilot slash commands", async () => {
+  for (const command of ["/plan", "/goal", "/verify", "/conv"] as const) {
+    const result = await runTelegramAdapter({
+      message: {
+        text: command,
+        chat_id: "343580315",
+        sender_id: "343580315",
+        chat_type: "direct",
+      },
+      enabledCommands: [command],
+      authorization: {
+        allowedChatIds: ["343580315"],
+      },
+    });
+
+    assert.equal(result.authorized, true);
+    assert.equal(result.command_result?.status, "needs_user_decision");
+    assert.equal(result.command_result?.error_code, undefined);
+    assert.equal(result.route?.command, command);
+    assert.match(result.telegram_text, /Status: command_needs_input/);
+    assert.match(result.telegram_text, /Usage/);
+    assert.match(result.telegram_text, /Example/);
+    assert.doesNotMatch(result.telegram_text, /Pilot command failed/);
+  }
+});
+
 test("Telegram adapter keeps disabled commands unavailable without fallback", async () => {
   const result = await runTelegramAdapter({
     message: {

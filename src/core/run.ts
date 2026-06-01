@@ -54,6 +54,8 @@ function bulletLines(values: string[]): string[] {
 
 function formatRouteReply(route: RouteResult): string {
   const report = route.user_report;
+  const usage = typeof route.result_summary?.usage === "string" ? route.result_summary.usage : undefined;
+  const example = typeof route.result_summary?.example === "string" ? route.result_summary.example : undefined;
   const runId = typeof route.result_summary?.run_id === "string" ? route.result_summary.run_id : undefined;
   const shortRunId =
     typeof route.result_summary?.short_run_id === "string" ? route.result_summary.short_run_id : undefined;
@@ -72,6 +74,7 @@ function formatRouteReply(route: RouteResult): string {
     ...(terminalStatus ? [`Terminal: ${terminalStatus}`] : []),
     `Command: ${route.command}`,
     ...(runId ? [`Run: ${shortRunId || runId}`, ...(shortRunId ? [`Run ID: ${runId}`] : [])] : []),
+    ...(usage ? ["", "Usage", `- ${usage}`, ...(example ? ["", "Example", `- ${example}`] : [])] : []),
     "",
     "Evidence",
     ...bulletLines(report.evidence_pointers),
