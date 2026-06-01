@@ -154,6 +154,18 @@ export async function resolveApprovalTarget(options) {
             validationRisks.push(`Plan run is not ready for approval resolution: ${goal.status}.`);
         }
     }
+    if (missingArtifacts.length === 0) {
+        try {
+            const executionPlan = await readExecutionPlan(join(entry.artifact_dir, executionPlanArtifactName));
+            validationRisks.push(...validateExecutionPlan(executionPlan));
+            if (executionPlan.plan_run_id !== entry.run_id) {
+                validationRisks.push(`execution plan run_id does not match approval target: ${entry.run_id}`);
+            }
+        }
+        catch {
+            validationRisks.push("execution-plan.json is missing or not a valid Pilot execution plan artifact.");
+        }
+    }
     if (validationRisks.length > 0) {
         return {
             status: "invalid",

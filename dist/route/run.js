@@ -14,15 +14,40 @@ import { shortRunId } from "../state/run-index.js";
 import { defaultStateRoot } from "../config.js";
 import { runVerify } from "../verify/run.js";
 const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "list", "status", "resume", "cancel"]);
-function userReport(status, evidencePointers, remainingRisks, nextAction) {
+function userReport(status, evidencePointers, remainingRisks, nextAction, approvalPreview) {
     const uniqueEvidencePointers = [...new Set(evidencePointers)];
     const uniqueRemainingRisks = [...new Set(remainingRisks)];
     return {
         status,
+        ...(approvalPreview?.length ? { approval_preview: [...new Set(approvalPreview)] } : {}),
         evidence_pointers: uniqueEvidencePointers,
         remaining_risks: uniqueRemainingRisks.length > 0 ? uniqueRemainingRisks : ["none"],
         next_action: nextAction,
     };
+}
+function executionPlanApprovalPreview(plan, shortId, runId) {
+    if (!plan)
+        return [];
+    const capabilities = [...new Set(plan.steps.map((step) => step.capability))].join(", ");
+    const riskClasses = [...new Set(plan.steps.map((step) => step.risk_class))].join(", ");
+    const expectedArtifacts = [...new Set(plan.steps.flatMap((step) => step.expected_artifacts))].slice(0, 5).join(", ");
+    return [
+        `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
+        `Steps: ${plan.steps.length}`,
+        `Capabilities: ${capabilities || "none"}`,
+        `Risk: ${riskClasses || "none"}`,
+        `Expected artifacts: ${expectedArtifacts || "none"}`,
+        `Command: approve ${shortId}`,
+        `Full run_id: ${runId}`,
+    ];
+}
+async function readPlanApprovalPreview(artifactDir, shortId, runId) {
+    try {
+        return executionPlanApprovalPreview(await readExecutionPlan(join(artifactDir, executionPlanArtifactName)), shortId, runId);
+    }
+    catch {
+        return [];
+    }
 }
 function findingRisks(findings) {
     return findings
@@ -1081,6 +1106,7 @@ export async function runRoute(options) {
             return usageRoute(parsed.command);
         const result = await runPlan({ request: parsed.rest });
         const shortId = shortRunId(result.run_id);
+        const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
         return {
             schema_version: "pilot.route.v0",
             status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
@@ -1100,7 +1126,7 @@ export async function runRoute(options) {
                 ? result.plan.ambiguity_questions || ["Plan requires user decision before any execution."]
                 : ["Execution not performed. This command only created local plan artifacts."], result.status === "needs_user_decision"
                 ? "Answer the ambiguity questions and rerun /plan."
-                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`),
+                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview),
         };
     }
     if (parsed.command === "/verify") {
@@ -1192,6 +1218,7 @@ export async function runRoute(options) {
     else if (!looksLikeGoalRequestPath(parsed.rest)) {
         const result = await runPlan({ request: parsed.rest });
         const shortId = shortRunId(result.run_id);
+        const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
         return {
             schema_version: "pilot.route.v0",
             status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
@@ -1212,7 +1239,7 @@ export async function runRoute(options) {
                 ? result.plan.ambiguity_questions || ["Goal request requires clarification before planning or execution."]
                 : ["Execution not performed. This command only created local goal-intake plan artifacts."], result.status === "needs_user_decision"
                 ? "Answer the ambiguity questions, then rerun /goal with a concrete request."
-                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`),
+                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview),
         };
     }
     const result = await runGoal({ requestPath });

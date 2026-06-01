@@ -34,6 +34,7 @@ import type {
   CommonPlanContract,
   ConvCheckpoint,
   ConvResult,
+  ExecutionPlan,
   GoalArtifact,
   GoalRequest,
   GoalRunResult,
@@ -61,15 +62,41 @@ function userReport(
   evidencePointers: string[],
   remainingRisks: string[],
   nextAction: string,
+  approvalPreview?: string[],
 ): RouteUserReport {
   const uniqueEvidencePointers = [...new Set(evidencePointers)];
   const uniqueRemainingRisks = [...new Set(remainingRisks)];
   return {
     status,
+    ...(approvalPreview?.length ? { approval_preview: [...new Set(approvalPreview)] } : {}),
     evidence_pointers: uniqueEvidencePointers,
     remaining_risks: uniqueRemainingRisks.length > 0 ? uniqueRemainingRisks : ["none"],
     next_action: nextAction,
   };
+}
+
+function executionPlanApprovalPreview(plan: ExecutionPlan | undefined, shortId: string, runId: string): string[] {
+  if (!plan) return [];
+  const capabilities = [...new Set(plan.steps.map((step) => step.capability))].join(", ");
+  const riskClasses = [...new Set(plan.steps.map((step) => step.risk_class))].join(", ");
+  const expectedArtifacts = [...new Set(plan.steps.flatMap((step) => step.expected_artifacts))].slice(0, 5).join(", ");
+  return [
+    `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
+    `Steps: ${plan.steps.length}`,
+    `Capabilities: ${capabilities || "none"}`,
+    `Risk: ${riskClasses || "none"}`,
+    `Expected artifacts: ${expectedArtifacts || "none"}`,
+    `Command: approve ${shortId}`,
+    `Full run_id: ${runId}`,
+  ];
+}
+
+async function readPlanApprovalPreview(artifactDir: string, shortId: string, runId: string): Promise<string[]> {
+  try {
+    return executionPlanApprovalPreview(await readExecutionPlan(join(artifactDir, executionPlanArtifactName)), shortId, runId);
+  } catch {
+    return [];
+  }
 }
 
 function findingRisks(findings: VerificationFinding[]): string[] {
@@ -1309,6 +1336,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
     if (!parsed.rest) return usageRoute(parsed.command);
     const result = await runPlan({ request: parsed.rest });
     const shortId = shortRunId(result.run_id);
+    const approvalPreview =
+      result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
     return {
       schema_version: "pilot.route.v0",
       status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
@@ -1333,6 +1362,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         result.status === "needs_user_decision"
           ? "Answer the ambiguity questions and rerun /plan."
           : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`,
+        approvalPreview,
       ),
     };
   }
@@ -1449,6 +1479,8 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   } else if (!looksLikeGoalRequestPath(parsed.rest)) {
     const result = await runPlan({ request: parsed.rest });
     const shortId = shortRunId(result.run_id);
+    const approvalPreview =
+      result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
     return {
       schema_version: "pilot.route.v0",
       status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
@@ -1474,6 +1506,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         result.status === "needs_user_decision"
           ? "Answer the ambiguity questions, then rerun /goal with a concrete request."
           : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`,
+        approvalPreview,
       ),
     };
   }

@@ -369,6 +369,7 @@ export type RouteCommand =
 
 export type RouteUserReport = {
   status: string;
+  approval_preview?: string[];
   evidence_pointers: string[];
   remaining_risks: string[];
   next_action: string;

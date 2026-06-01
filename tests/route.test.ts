@@ -837,6 +837,54 @@ test("approve route resolves, records, and executes a scoped receipt run", async
   }
 });
 
+test("approve route blocks tampered execution plans before recording approval", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const plan = await runPlan({ request: "Draft a local approval tamper test plan." });
+    const shortId = shortRunId(plan.run_id);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23096",
+      source_update_id: "23096",
+      command: "/plan",
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      status: "plan_created",
+      artifact_dir: plan.artifact_dir,
+      next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+    });
+
+    const executionPlanPath = join(plan.artifact_dir, "execution-plan.json");
+    const executionPlan = JSON.parse(await readFile(executionPlanPath, "utf8")) as Record<string, unknown>;
+    executionPlan.goal_summary = "tampered after planning";
+    await writeFile(executionPlanPath, `${JSON.stringify(executionPlan, null, 2)}\n`, "utf8");
+
+    const output = await runRoute({
+      input: `approve ${shortId}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23097" },
+    });
+
+    assert.equal(output.status, "blocked");
+    assert.equal(output.user_report.status, "approval_target_invalid");
+    assert.ok(output.user_report.remaining_risks.some((risk) => risk.includes("execution plan hash mismatch")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("execution-plan.json")));
+    await assert.rejects(readFile(join(plan.artifact_dir, "approved-execution-request.json"), "utf8"));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("approve route creates a Pilot receipts dashboard for dashboard receipt goals", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();

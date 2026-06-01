@@ -71,7 +71,7 @@ export function buildPostExecutionEvidencePacket(request, runId, steps, receipts
         {
             id: `step-${step.step}-artifact`,
             type: "artifact",
-            description: `Primary artifact for step ${step.step}: ${step.capability}.`,
+            description: `Primary artifact for execution_step_id ${step.execution_step_id || `step-${step.step}`}: ${step.capability}.`,
             criteria_ids: ["runner_artifacts", "approved_execution"],
             supports_claim: true,
             in_scope: true,
@@ -80,7 +80,7 @@ export function buildPostExecutionEvidencePacket(request, runId, steps, receipts
         ...(step.supporting_artifacts || []).map((path, index) => ({
             id: `step-${step.step}-support-${index + 1}`,
             type: "artifact",
-            description: `Supporting artifact ${index + 1} for step ${step.step}: ${step.capability}.`,
+            description: `Supporting artifact ${index + 1} for execution_step_id ${step.execution_step_id || `step-${step.step}`}: ${step.capability}.`,
             criteria_ids: ["runner_artifacts"],
             supports_claim: true,
             in_scope: true,
@@ -90,7 +90,7 @@ export function buildPostExecutionEvidencePacket(request, runId, steps, receipts
     evidence.push({
         id: "typed-receipts",
         type: "artifact",
-        description: "Typed receipt file for the approved goal execution.",
+        description: "Typed receipt file for the approved goal execution; every receipt must include execution_step_id.",
         criteria_ids: ["typed_receipt"],
         supports_claim: true,
         in_scope: true,

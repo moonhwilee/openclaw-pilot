@@ -159,6 +159,9 @@ test("pilot goal executes approved low-risk scoped artifact capability", async (
   assert.match(receipts, /"approval_reference":"approval-001"/);
   assert.match(receipts, /"capability":"create_artifact"/);
   assert.match(receipts, /"execution_step_id":"step-1"/);
+  const postExecutionEvidence = await readFile(join(result.artifact_dir, "post-execution-evidence.json"), "utf8");
+  assert.match(postExecutionEvidence, /execution_step_id step-1/);
+  assert.match(postExecutionEvidence, /every receipt must include execution_step_id/);
   const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
   assert.match(lineage, /"approval_reference":"approval-001"/);
   assert.match(lineage, /"receipt_pointers":/);
