@@ -8,12 +8,17 @@ Current workspace roadmap and TODO are tracked in
 The next PilotLead UX and quality-loop implementation contract is documented
 in `docs/pilotlead-v0.2.8-product-contract.md`.
 
+The next natural-command UX contract is documented in
+`docs/natural-command-contract-v0.2.10.md`: user-facing examples should be
+natural-language-first, while JSON path forms remain advanced artifact
+shortcuts.
+
 ## Install
 
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.9
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.10
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -41,9 +46,9 @@ Current scope:
 - `pilot doctor` reports package/config/state health in a user-friendly way.
 - `pilot smoke` runs a quick maintainer/CI health check over the shipped fixtures, including the typed `execution-plan.json` contract/hash check.
 - `pilot plan <request>` creates local plan artifacts only.
-- `pilot verify <evidence-packet.json>` evaluates a supplied evidence packet only.
-- `pilot conv <conv-request.json>` reduces bounded findings around an anchor using local artifact updates only.
-- `pilot goal <goal-request.json>` runs approved goals with typed receipts.
+- `pilot verify <natural target>` verifies a claim, recent run, or run reference by building any needed internal evidence packet. JSON evidence packets remain advanced artifact shortcuts.
+- `pilot conv <natural target>` converges clear findings from a recent run, run reference, or supplied anchor. JSON conv requests remain advanced artifact shortcuts.
+- `pilot goal <natural objective>` creates a goal-intake plan and waits for approval before execution. Approved goal request JSON remains an advanced artifact shortcut.
 - `pilot list [limit]` lists recent Pilot runs from shared lineage without changing state.
 - `pilot status <Run>` inspects one run's lifecycle, lineage, evidence, receipts, recovery freshness, and available artifacts without changing state.
 - `pilot resume <Run>` writes `resume.json`, computes the latest safe phase checkpoint, and can automatically resume approved runner-backed work from `execute`, missing post-execution `verify`, fixable `converge`, missing post-convergence `reverify`, or standalone `/conv` from `conv-checkpoint.json` with a `resume-lock.json` idempotency guard.
@@ -77,28 +82,36 @@ npm run pilot -- init
 npm run pilot -- doctor
 npm run pilot -- smoke
 npm run pilot -- plan "Draft a strategy for ..."
+npm run pilot -- verify "최근 goal 결과가 충분히 검증됐는지 봐줘"
+npm run pilot -- conv "최근 검증에서 나온 P2 문제 수렴해줘"
+npm run pilot -- goal "Create a tiny local smoke artifact and verify it"
+npm run pilot -- list
+npm run pilot -- status recent
+npm run pilot -- resume <Run>
+npm run pilot -- cancel <Run>
+npm run pilot -- route --disabled "/plan Draft a document strategy plan"
+npm run pilot -- route --enabled "/verify 최근 goal 결과 검증해줘"
+npm run pilot -- live --enabled=/plan "/plan Draft a document strategy plan"
+```
+
+Advanced artifact shortcuts for maintainers and fixtures:
+
+```bash
 npm run pilot -- verify fixtures/document_strategy/evidence-packet.json
 npm run pilot -- conv fixtures/document_strategy/conv-request.json
 npm run pilot -- goal fixtures/document_strategy/goal-request-draft.json
 npm run pilot -- goal fixtures/document_strategy/goal-request-approved.json
-npm run pilot -- list
-npm run pilot -- status <Run>
-npm run pilot -- resume <Run>
-npm run pilot -- cancel <Run>
-npm run pilot -- route --disabled "/plan Draft a document strategy plan"
-npm run pilot -- route --enabled "/verify fixtures/research/evidence-packet.json"
-npm run pilot -- live --enabled=/plan "/plan Draft a document strategy plan"
 ```
 
 Override state root:
 
 ```bash
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- plan "Draft a strategy for ..."
-PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- verify fixtures/document_strategy/evidence-packet.json
-PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- conv fixtures/document_strategy/conv-request.json
-PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- goal fixtures/document_strategy/goal-request-approved.json
+PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- verify "최근 실행 결과 검증해줘"
+PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- conv "최근 검증 finding 수렴해줘"
+PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- goal "Draft and verify a local strategy artifact"
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- list 5
-PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- status <Run>
+PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- status recent
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- resume <Run>
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- cancel <Run> "owner changed priority"
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- route --enabled "/plan Draft a strategy"
@@ -113,7 +126,7 @@ PILOT_RECOVERY_STALE_AFTER_MS=1800000 npm run pilot -- status <Run>
 
 `PILOT_RECOVERY_STALE_AFTER_MS` controls when a non-terminal, non-cancelled run is shown as stale in `list`, `status`, and `resume` output. The default is 30 minutes. Stale status does not mean "rerun from the beginning"; `resume <Run>` uses the latest safe checkpoint. The current v1 slice can auto-resume approved runner-backed work from `execute`, restart a missing post-execution `verify`, run bounded `converge` for fixable verification findings, restart a missing post-convergence `reverify`, and continue standalone `/conv` from `conv-checkpoint.json`.
 
-Standalone `/verify` remains rerunnable by evidence packet for now. The future checkpoint contract is opened as `pilot.verify_checkpoint.v0`: long verification can record processed criteria, processed evidence, written findings, and the next verification action before adding criteria-level resume execution.
+Standalone natural `/verify` writes an internal evidence packet before running verification. Direct evidence packet paths remain rerunnable as advanced artifact shortcuts. The future checkpoint contract is opened as `pilot.verify_checkpoint.v0`: long verification can record processed criteria, processed evidence, written findings, and the next verification action before adding criteria-level resume execution.
 
 Enable a session runner explicitly:
 

@@ -35,6 +35,13 @@ import {
 } from "../state/recovery.ts";
 import { shortRunId } from "../state/run-index.ts";
 import { defaultStateRoot } from "../config.ts";
+import {
+  latestRecoveryRun,
+  looksLikeRunReference as looksLikeTargetRunReference,
+  resolveCommandTarget,
+  writeConvRequestFromVerification,
+  writeEvidencePacketForRun,
+} from "./target.ts";
 import { runVerify } from "../verify/run.ts";
 import type {
   CommonPlanContract,
@@ -178,16 +185,16 @@ const commandUsage: Record<"/plan" | "/verify" | "/conv" | "/goal", { usage: str
     next: "Send /goal followed by a concrete objective. Pilot will plan first and wait for approval before execution.",
   },
   "/verify": {
-    usage: "/verify <evidence-packet.json>",
-    example: "/verify artifacts/pilot/evidence-packet.json",
-    missing: "Missing evidence packet path.",
-    next: "Send /verify followed by an evidence packet JSON path.",
+    usage: "/verify <what to verify>",
+    example: "/verify 최근 goal 결과가 충분히 검증됐는지 봐줘",
+    missing: "Missing verification target.",
+    next: "Send /verify followed by a natural-language claim, a recent/latest alias, a run id, or an advanced evidence packet JSON path.",
   },
   "/conv": {
-    usage: "/conv <conv-request.json>",
-    example: "/conv artifacts/pilot/conv-request.json",
-    missing: "Missing convergence request path.",
-    next: "Send /conv followed by a convergence request JSON path.",
+    usage: "/conv <what to converge>",
+    example: "/conv 최근 검증에서 나온 P2 문제 수렴해줘",
+    missing: "Missing convergence target.",
+    next: "Send /conv followed by a natural-language finding, a recent/latest alias, a run id, or an advanced conv request JSON path.",
   },
 };
 
@@ -228,7 +235,7 @@ function metadataString(metadata: Record<string, unknown> | undefined, key: stri
 }
 
 function looksLikeRunReference(value: string): boolean {
-  return /^\d{6}$/.test(value) || /^\d{8}T\d{6}Z-[a-z0-9가-힣-]+$/.test(value);
+  return looksLikeTargetRunReference(value);
 }
 
 function looksLikeGoalRequestPath(value: string): boolean {
@@ -323,6 +330,167 @@ function ambiguousRecoveryReport(
     ],
     `Retry with one full run_id, for example: ${example}.`,
   );
+}
+
+function targetNeedsRunReport(command: RouteResult["command"], status: string, target: string, nextAction: string): RouteResult {
+  return {
+    schema_version: "pilot.route.v0",
+    status: "needs_user_decision",
+    command,
+    enabled: true,
+    backend: "openclaw-pilot",
+    result_summary: { status, target },
+    user_report: userReport(status, [], [target], nextAction),
+  };
+}
+
+function missingJsonPathReport(command: "/verify" | "/conv", path: string): RouteResult {
+  const naturalExample =
+    command === "/verify"
+      ? "/verify 최근 goal 결과가 충분히 검증됐는지 봐줘"
+      : "/conv 최근 검증에서 나온 P2 문제 수렴해줘";
+  return {
+    schema_version: "pilot.route.v0",
+    status: "needs_user_decision",
+    command,
+    enabled: true,
+    backend: "openclaw-pilot",
+    result_summary: {
+      status: "advanced_artifact_path_missing",
+      path,
+    },
+    user_report: userReport(
+      "advanced_artifact_path_missing",
+      [],
+      [
+        "Advanced JSON artifact path was not found.",
+        "Normal users can send a natural-language target instead of creating JSON manually.",
+      ],
+      `Retry with natural language, for example: ${naturalExample}`,
+    ),
+  };
+}
+
+async function newestRunReference(stateRoot: string): Promise<PilotRecoveryRunSummary | undefined> {
+  return latestRecoveryRun(stateRoot);
+}
+
+async function recoveryReferenceFromRest(
+  command: "status" | "resume" | "cancel",
+  rest: string,
+): Promise<
+  | { status: "resolved"; reference: string }
+  | { status: "needs_user_decision"; route: RouteResult }
+> {
+  const stateRoot = defaultStateRoot();
+  const target = await resolveCommandTarget(rest);
+  if (target.kind === "recent_alias") {
+    const latest = await newestRunReference(stateRoot);
+    if (!latest) {
+      return {
+        status: "needs_user_decision",
+        route: targetNeedsRunReport(
+          command,
+          `recovery_${command}_no_recent_run`,
+          target.raw,
+          "Run /plan or /goal first, then retry with recent/latest or a concrete run id.",
+        ),
+      };
+    }
+    if (command === "cancel") {
+      return {
+        status: "needs_user_decision",
+        route: {
+          schema_version: "pilot.route.v0",
+          status: "needs_user_decision",
+          command,
+          enabled: true,
+          backend: "openclaw-pilot",
+          result_summary: {
+            status: "recovery_cancel_recent_requires_confirmation",
+            reference: target.raw,
+            run: latest,
+          },
+          user_report: userReport(
+            "recovery_cancel_recent_requires_confirmation",
+            [recoveryCandidateLine("cancel", latest)],
+            ["Cancel is destructive for an in-flight run, so recent/latest aliases are not cancelled silently."],
+            `Confirm the exact target by replying cancel ${latest.run_id}.`,
+          ),
+        },
+      };
+    }
+    return { status: "resolved", reference: latest.run_id };
+  }
+
+  if (target.kind === "run_reference") return { status: "resolved", reference: target.reference };
+  return { status: "resolved", reference: rest };
+}
+
+async function resolveRunTarget(command: "/verify" | "/conv", raw: string): Promise<
+  | { status: "json_path"; path: string }
+  | { status: "run"; run: PilotRecoveryRunStatus; natural_request: string }
+  | { status: "needs_user_decision"; route: RouteResult }
+> {
+  const stateRoot = defaultStateRoot();
+  const target = await resolveCommandTarget(raw);
+  if (target.kind === "empty") return { status: "needs_user_decision", route: usageRoute(command) };
+  if (target.kind === "json_path_existing") return { status: "json_path", path: target.path };
+  if (target.kind === "json_path_missing") return { status: "needs_user_decision", route: missingJsonPathReport(command, target.path) };
+
+  const reference =
+    target.kind === "run_reference"
+      ? target.reference
+      : target.kind === "recent_alias"
+        ? (await newestRunReference(stateRoot))?.run_id
+        : (await newestRunReference(stateRoot))?.run_id;
+
+  if (!reference) {
+    return {
+      status: "needs_user_decision",
+      route: targetNeedsRunReport(
+        command,
+        `${command === "/verify" ? "verify" : "conv"}_needs_anchor`,
+        target.raw,
+        command === "/verify"
+          ? "Run /plan, /goal, or provide a concrete run id before asking for verification."
+          : "Run /verify first or provide a concrete run id with verification findings before asking for convergence.",
+      ),
+    };
+  }
+
+  const resolution = await resolveRecoveryRun(stateRoot, reference);
+  if (resolution.status === "not_found") {
+    return {
+      status: "needs_user_decision",
+      route: targetNeedsRunReport(
+        command,
+        `${command === "/verify" ? "verify" : "conv"}_run_not_found`,
+        target.raw,
+        "Run list to find recent Pilot runs, then retry with a short or full run id.",
+      ),
+    };
+  }
+  if (resolution.status === "ambiguous") {
+    return {
+      status: "needs_user_decision",
+      route: {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: {
+          status: `${command === "/verify" ? "verify" : "conv"}_run_ambiguous`,
+          reference: resolution.reference,
+          matches: resolution.matches,
+        },
+        user_report: ambiguousRecoveryReport("status", `${command === "/verify" ? "verify" : "conv"}_run_ambiguous`, resolution.reference, resolution.matches),
+      },
+    };
+  }
+
+  return { status: "run", run: resolution.run, natural_request: target.raw };
 }
 
 type ResumeCheckpointPhase =
@@ -1051,7 +1219,9 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
 
   if (parsed.command === "status") {
     if (!parsed.rest) throw new Error("route status requires a run reference");
-    const resolution = await resolveRecoveryRun(defaultStateRoot(), parsed.rest);
+    const target = await recoveryReferenceFromRest("status", parsed.rest);
+    if (target.status === "needs_user_decision") return target.route;
+    const resolution = await resolveRecoveryRun(defaultStateRoot(), target.reference);
     if (resolution.status === "not_found") {
       return {
         schema_version: "pilot.route.v0",
@@ -1108,7 +1278,9 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
 
   if (parsed.command === "resume") {
     if (!parsed.rest) throw new Error("route resume requires a run reference");
-    const resolution = await resolveRecoveryRun(defaultStateRoot(), parsed.rest);
+    const target = await recoveryReferenceFromRest("resume", parsed.rest);
+    if (target.status === "needs_user_decision") return target.route;
+    const resolution = await resolveRecoveryRun(defaultStateRoot(), target.reference);
     if (resolution.status === "not_found") {
       return {
         schema_version: "pilot.route.v0",
@@ -1196,7 +1368,9 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   if (parsed.command === "cancel") {
     const { reference, reason } = parseRunReferenceAndReason(parsed.rest);
     if (!reference) throw new Error("route cancel requires a run reference");
-    const cancellation = await cancelRecoveryRun(defaultStateRoot(), reference, { reason, metadata: options.metadata });
+    const target = await recoveryReferenceFromRest("cancel", reference);
+    if (target.status === "needs_user_decision") return target.route;
+    const cancellation = await cancelRecoveryRun(defaultStateRoot(), target.reference, { reason, metadata: options.metadata });
     if (cancellation.status === "not_found") {
       return {
         schema_version: "pilot.route.v0",
@@ -1276,6 +1450,32 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
 
   if (parsed.command === "approve") {
     if (!parsed.rest) throw new Error("route approve requires a run reference");
+    const approvalTarget = await resolveCommandTarget(parsed.rest);
+    if (approvalTarget.kind === "recent_alias") {
+      const latest = await newestRunReference(defaultStateRoot());
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: {
+          status: latest ? "approval_recent_requires_explicit_target" : "approval_no_recent_run",
+          reference: parsed.rest,
+          run: latest,
+        },
+        user_report: userReport(
+          latest ? "approval_recent_requires_explicit_target" : "approval_no_recent_run",
+          latest ? [`short=${latest.short_run_id} run_id=${latest.run_id} artifact_dir=${latest.artifact_dir}`] : [],
+          latest
+            ? ["Approval is an execution authorization, so recent/latest aliases are not approved silently."]
+            : ["No recent Pilot run was found."],
+          latest
+            ? `Review the exact plan, then approve explicitly with approve ${latest.run_id}.`
+            : "Run /goal first, review the plan, then approve the exact run id.",
+        ),
+      };
+    }
     const result = await resolveApprovalTarget({
       reference: parsed.rest,
       recordApproval: true,
@@ -1409,8 +1609,25 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   }
 
   if (parsed.command === "/verify") {
-    if (!parsed.rest) return usageRoute(parsed.command);
-    const result = await runVerify({ packetPath: parsed.rest });
+    const target = await resolveRunTarget(parsed.command, parsed.rest);
+    if (target.status === "needs_user_decision") return target.route;
+    const packetPath =
+      target.status === "json_path"
+        ? target.path
+        : await writeEvidencePacketForRun(
+            target.run,
+            `Verify Pilot run ${target.run.short_run_id}: ${target.natural_request}`,
+          );
+    if (!packetPath) {
+      return targetNeedsRunReport(
+        parsed.command,
+        "verify_needs_evidence",
+        target.status === "run" ? target.natural_request : parsed.rest,
+        "The target run has no readable artifacts yet. Run status <Run> or provide a concrete evidence source before retrying /verify.",
+      );
+    }
+    const result = await runVerify({ packetPath });
+    const evidencePointers = [packetPath, ...result.created_files];
     return {
       schema_version: "pilot.route.v0",
       status: result.verdict === "blocked" ? "blocked" : "routed",
@@ -1422,13 +1639,14 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         semantic_verdict: result.semantic_verdict,
         reviewer_summary: result.reviewer_summary,
         run_id: result.run_id,
+        evidence_packet_path: packetPath,
         artifact_dir: result.artifact_dir,
         created_files: result.created_files,
         profile_expectations: profileExpectationSummary(result.packet.claim.profile),
       },
       user_report: userReport(
         result.semantic_verdict !== "not_requested" ? `semantic_${result.semantic_verdict}` : result.verdict,
-        result.created_files,
+        evidencePointers,
         findingRisks(result.findings),
         result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
           ? "Use the verification artifact as the evidence pointer for the next step."
@@ -1440,8 +1658,39 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   }
 
   if (parsed.command === "/conv") {
-    if (!parsed.rest) return usageRoute(parsed.command);
-    const result = await runConv({ requestPath: parsed.rest });
+    const target = await resolveRunTarget(parsed.command, parsed.rest);
+    if (target.status === "needs_user_decision") return target.route;
+    let requestPath: string | undefined;
+    if (target.status === "json_path") {
+      requestPath = target.path;
+    } else {
+      let verification = await readVerificationResultIfExists(target.run.artifact_dir);
+      if (!verification) {
+        const goalRun = await readGoalRunIfExists(target.run.artifact_dir);
+        if (goalRun?.post_execution_verification?.artifact_dir) {
+          verification = await readVerificationResultIfExists(goalRun.post_execution_verification.artifact_dir);
+        }
+      }
+      if (!verification) {
+        return targetNeedsRunReport(
+          parsed.command,
+          "conv_needs_verification_anchor",
+          target.natural_request,
+          "Run /verify first or provide a run that has verification findings before retrying /conv.",
+        );
+      }
+      requestPath = await writeConvRequestFromVerification(target.run, verification, target.natural_request);
+      if (!requestPath) {
+        return targetNeedsRunReport(
+          parsed.command,
+          "conv_needs_actionable_findings",
+          target.natural_request,
+          "The target verification has no actionable findings to converge. Use status <Run> or create a narrower /goal if new work is needed.",
+        );
+      }
+    }
+    const result = await runConv({ requestPath });
+    const evidencePointers = [requestPath, ...result.created_files];
     return {
       schema_version: "pilot.route.v0",
       status: result.status === "blocked" ? "blocked" : result.status === "needs_user_decision" ? "needs_user_decision" : "routed",
@@ -1451,13 +1700,14 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
       result_summary: {
         status: result.status,
         run_id: result.run_id,
+        request_path: requestPath,
         artifact_dir: result.artifact_dir,
         rounds: result.rounds.length,
         created_files: result.created_files,
       },
       user_report: userReport(
         result.status,
-        result.created_files,
+        evidencePointers,
         result.findings.filter((finding) => finding.status === "open").map((finding) => `${finding.id}: ${finding.description}`),
         result.status === "completed"
           ? "Run /verify with the updated evidence packet when a final verdict is needed."

@@ -1,13 +1,10 @@
 #!/usr/bin/env node
-import { runConv } from "./conv/run.js";
 import { runDoctor } from "./doctor/run.js";
-import { runGoal } from "./goal/run.js";
 import { runInit } from "./init/run.js";
 import { runLiveAdapter } from "./live-adapter/run.js";
 import { runPlan } from "./plan/run.js";
 import { runRoute } from "./route/run.js";
 import { runSmoke } from "./smoke/run.js";
-import { runVerify } from "./verify/run.js";
 function usage() {
     return [
         "Usage:",
@@ -15,9 +12,9 @@ function usage() {
         "  pilot doctor [--strict]",
         "  pilot smoke",
         '  pilot plan "<request>"',
-        "  pilot verify <evidence-packet.json>",
-        "  pilot conv <conv-request.json>",
-        "  pilot goal <goal-request.json>",
+        '  pilot verify "<what to verify>"',
+        '  pilot conv "<what to converge>"',
+        '  pilot goal "<what to accomplish>"',
         "  pilot list [limit]",
         "  pilot status <Run>",
         "  pilot resume <Run>",
@@ -25,7 +22,7 @@ function usage() {
         '  pilot route --enabled|--disabled "<exact command>"',
         '  pilot live --enabled=/plan,/verify "<exact command>"',
         "",
-        "Current local Pilot supports easy package init plus plan, verify, anchored conv, and scoped goal.",
+        "Current local Pilot supports natural-language plan, verify, anchored conv, and scoped goal commands. JSON paths remain advanced artifact shortcuts.",
     ].join("\n");
 }
 async function main(argv) {
@@ -52,56 +49,34 @@ async function main(argv) {
         return result.status === "ok" ? 0 : 1;
     }
     if (command === "verify") {
-        const packetPath = rest.join(" ").trim();
-        if (!packetPath) {
-            console.error("pilot verify requires an evidence packet JSON path");
+        const target = rest.join(" ").trim();
+        if (!target) {
+            console.error("pilot verify requires a natural-language target, run reference, recent alias, or advanced evidence packet JSON path");
             return 1;
         }
-        const result = await runVerify({ packetPath });
-        console.log(JSON.stringify({
-            verdict: result.verdict,
-            semantic_verdict: result.semantic_verdict,
-            reviewer_summary: result.reviewer_summary,
-            run_id: result.run_id,
-            artifact_dir: result.artifact_dir,
-            created_files: result.created_files,
-            findings: result.findings,
-        }, null, 2));
-        return 0;
+        const result = await runRoute({ input: `/verify ${target}`, enabled: true });
+        console.log(JSON.stringify(result, null, 2));
+        return result.status === "needs_user_decision" || result.status === "blocked" ? 1 : 0;
     }
     if (command === "conv") {
-        const requestPath = rest.join(" ").trim();
-        if (!requestPath) {
-            console.error("pilot conv requires a conv request JSON path");
+        const target = rest.join(" ").trim();
+        if (!target) {
+            console.error("pilot conv requires a natural-language target, run reference, recent alias, or advanced conv request JSON path");
             return 1;
         }
-        const result = await runConv({ requestPath });
-        console.log(JSON.stringify({
-            status: result.status,
-            run_id: result.run_id,
-            artifact_dir: result.artifact_dir,
-            created_files: result.created_files,
-            findings: result.findings,
-            rounds: result.rounds,
-        }, null, 2));
-        return 0;
+        const result = await runRoute({ input: `/conv ${target}`, enabled: true });
+        console.log(JSON.stringify(result, null, 2));
+        return result.status === "needs_user_decision" || result.status === "blocked" ? 1 : 0;
     }
     if (command === "goal") {
-        const requestPath = rest.join(" ").trim();
-        if (!requestPath) {
-            console.error("pilot goal requires a goal request JSON path");
+        const target = rest.join(" ").trim();
+        if (!target) {
+            console.error("pilot goal requires a natural-language objective or advanced goal request JSON path");
             return 1;
         }
-        const result = await runGoal({ requestPath });
-        console.log(JSON.stringify({
-            status: result.status,
-            run_id: result.run_id,
-            artifact_dir: result.artifact_dir,
-            created_files: result.created_files,
-            findings: result.findings,
-            steps: result.steps,
-        }, null, 2));
-        return 0;
+        const result = await runRoute({ input: `/goal ${target}`, enabled: true });
+        console.log(JSON.stringify(result, null, 2));
+        return result.status === "blocked" ? 1 : 0;
     }
     if (command === "list") {
         const input = `list ${rest.join(" ").trim()}`.trim();

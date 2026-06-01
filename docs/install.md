@@ -10,7 +10,7 @@ Current workspace roadmap and TODO live at
 Install from the current GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.9
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.10
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -50,12 +50,31 @@ to `lineage.jsonl` in the run directory and `index/lineage.jsonl` under the
 state root. Use the lineage index when recovering or connecting `/plan`,
 `/verify`, `/conv`, `/goal`, and `approve` across one workflow.
 
+Natural-language commands are the primary user-facing path:
+
+```bash
+pilot plan "Draft a rollout plan for the Pilot Telegram smoke test"
+pilot goal "Create a tiny local smoke artifact and verify it"
+pilot verify "최근 goal 결과가 충분히 검증됐는지 봐줘"
+pilot conv "최근 검증에서 나온 P2 문제 수렴해줘"
+```
+
+JSON paths are still supported as advanced artifact shortcuts for maintainers,
+fixtures, and tests:
+
+```bash
+pilot goal fixtures/document_strategy/goal-request-draft.json
+pilot verify fixtures/document_strategy/evidence-packet.json
+pilot conv fixtures/document_strategy/conv-request.json
+```
+
 Recovery commands inspect that shared state and handle safe cancellation:
 
 ```bash
 pilot list
 pilot list 5
 pilot status <Run>
+pilot status recent
 pilot resume <Run>
 pilot cancel <Run> "owner changed priority"
 ```
@@ -76,11 +95,13 @@ the beginning. `pilot cancel <Run>` writes `cancel.json`,
 appends a cancellation lineage record, and blocks later `approve` or `/goal
 <Run>` continuation for that run.
 
-Standalone `/conv` writes `conv-request.json` and `conv-checkpoint.json`, so an
-interrupted convergence run can continue from the next round. Standalone
-`/verify` remains safely rerunnable from its evidence packet today; the
-`pilot.verify_checkpoint.v0` contract is reserved for future long verification
-that needs criteria/evidence-level resume.
+Standalone natural `/conv` writes an internal `conv-request.json` and
+`conv-checkpoint.json`, so an interrupted convergence run can continue from the
+next round. Standalone natural `/verify` writes an internal evidence packet
+before running verification. Direct JSON paths remain safely rerunnable as
+advanced artifact shortcuts; the `pilot.verify_checkpoint.v0` contract is
+reserved for future long verification that needs criteria/evidence-level
+resume.
 
 Non-terminal, non-cancelled runs are considered stale after 30 minutes by
 default. Set `PILOT_RECOVERY_STALE_AFTER_MS` to tune that window for local

@@ -69,19 +69,19 @@ test("core API returns safe unsupported result without legacy fallback", async (
   assert.match(result.recovery_hint || "", /\/plan, \/verify, \/conv, \/goal/);
 });
 
-test("core API returns safe failed result without exposing thrown error details", async () => {
+test("core API returns safe natural-first guidance for missing advanced JSON paths", async () => {
   const result = await runPilotCommand({
     input: "/verify /tmp/pilot-core-missing-evidence-packet.json",
     enabledCommands: ["/verify"],
   });
 
-  assert.equal(result.status, "failed");
-  assert.equal(result.enabled, false);
+  assert.equal(result.status, "needs_user_decision");
+  assert.equal(result.enabled, true);
   assert.equal(result.command, "/verify");
-  assert.equal(result.route, undefined);
-  assert.equal(result.error_code, "pilot_command_failed");
-  assert.match(result.reply_text, /Pilot command failed/);
+  assert.equal(result.route?.status, "needs_user_decision");
+  assert.equal(result.route?.result_summary?.status, "advanced_artifact_path_missing");
+  assert.match(result.reply_text, /Status: advanced_artifact_path_missing/);
+  assert.match(result.reply_text, /natural-language target/);
   assert.doesNotMatch(result.reply_text, /ENOENT/);
-  assert.doesNotMatch(result.reply_text, /pilot-core-missing-evidence-packet/);
   assert.doesNotMatch(result.reply_text, /\/tmp\//);
 });
