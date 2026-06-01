@@ -2,6 +2,9 @@
 
 OpenClaw Pilot should feel like a normal CLI package. The default path is easy; diagnostics are available when needed.
 
+Current workspace roadmap and TODO live at
+`/Users/moon/.openclaw/workspace/docs/openclaw-pilot/current-roadmap.md`.
+
 ## Quick Install
 
 ```bash
@@ -31,6 +34,44 @@ pilot smoke
 
 `pilot smoke` runs the bundled plan, verify, conv, route, goal-draft, and live-adapter checks against temporary state.
 
+## State And Lineage
+
+`PILOT_STATE_ROOT` can override where artifacts are written. By default Pilot
+stores state under the OpenClaw workspace state directory.
+
+Each command writes its own artifacts and also appends a shared lineage record
+to `lineage.jsonl` in the run directory and `index/lineage.jsonl` under the
+state root. Use the lineage index when recovering or connecting `/plan`,
+`/verify`, `/conv`, `/goal`, and `approve` across one workflow.
+
+## Session Runner
+
+Approved implementation/code/fix/test-like goals can use the minimal
+`run_codex_session` runner. The runner is disabled unless explicitly enabled:
+
+```bash
+PILOT_SESSION_RUNNER_ENABLED=true
+PILOT_SESSION_RUNNER_COMMAND=codex
+PILOT_SESSION_RUNNER_ARGS_JSON='["exec","--ask-for-approval","never","--sandbox","workspace-write","-"]'
+PILOT_SESSION_RUNNER_TIMEOUT_MS=120000
+```
+
+The runner receives the approved Pilot task prompt on stdin. Pilot records the
+prompt, stdout, stderr, runner result metadata, and a typed receipt. After a
+successful approved execution, Pilot writes `post-execution-evidence.json` and
+automatically runs deterministic `/verify` against the produced artifacts and
+receipts. If verification returns fixable findings, Pilot can write
+`post-execution-conv-request.json`, run bounded local `/conv`, write
+`post-convergence-evidence.json`, and re-run deterministic `/verify`. If the
+runner needs work outside the approved plan, it must stop and report that
+boundary instead of silently expanding scope.
+
+Approved goal results also include a lifecycle summary. User-facing route and
+Telegram text now distinguish terminal states such as `completed_verified`,
+`completed_after_convergence`, `completed_with_risks`, `needs_user_decision`,
+and `blocked`, and include a phase marker for the latest visible lifecycle
+point.
+
 ## Gateway And Telegram
 
 Gateway/Telegram routing should stay disabled until the local CLI path is working:
@@ -41,11 +82,33 @@ pilot doctor
 pilot smoke
 ```
 
-Then enable exact commands in this order:
+The original staged rollout order was:
 
 1. `/plan`
 2. `/verify`
 3. `/conv`
 4. `/goal`
 
+In the current workspace runtime, `/plan`, `/goal`, and `approve <Run>` have
+already been live-smoked. Keep the live command list explicit and minimal for
+the active environment.
+
 The package must not fall back to legacy Converge or GoalFlow behavior.
+
+Gateway integrations should import the thin bridge instead of shelling out:
+
+```ts
+import { runGatewayBridge } from "openclaw-pilot/gateway";
+
+const result = await runGatewayBridge({
+  message,
+  gate: {
+    liveRoutingEnabled: true,
+    enabledCommands: ["/plan"],
+    trustOpenClawSender: true,
+    timeoutMs: 2500,
+  },
+});
+```
+
+Keep the Gateway live-routing config separate from `pilot.config.json`. Rollback should set `liveRoutingEnabled` to `false`; disabled commands return `unavailable` and explicitly do not invoke a legacy backend.

@@ -2,6 +2,9 @@
 
 OpenClaw Pilot is a local planning, verification, convergence, and scoped-goal CLI.
 
+Current workspace roadmap and TODO are tracked in
+`/Users/moon/.openclaw/workspace/docs/openclaw-pilot/current-roadmap.md`.
+
 ## Install
 
 From npm, once published:
@@ -37,15 +40,23 @@ Current scope:
 - `pilot plan <request>` creates local plan artifacts only.
 - `pilot verify <evidence-packet.json>` evaluates a supplied evidence packet only.
 - `pilot conv <conv-request.json>` reduces bounded findings around an anchor using local artifact updates only.
-- `pilot goal <goal-request.json>` runs only scoped local goals with explicit approval and typed receipts.
+- `pilot goal <goal-request.json>` runs approved goals with typed receipts.
 - `pilot route --enabled|--disabled "<exact command>"` tests exact command routing without invoking any legacy backend.
 - `pilot live --enabled=/plan,/verify "<exact command>"` applies per-command live enablement and renders Telegram-safe text.
+- `approve <Run>` resolves a plan/run handle and, for supported approved goals, can continue into execution.
+- Approved implementation/code/fix/test-like goals can use the minimal `run_codex_session` runner when `PILOT_SESSION_RUNNER_ENABLED=true`.
+- Approved goal execution writes `post-execution-evidence.json` and automatically runs deterministic `/verify` against produced artifacts and typed receipts.
+- If automatic post-execution verification returns fixable findings, approved goal execution can write `post-execution-conv-request.json`, run bounded local `/conv`, write `post-convergence-evidence.json`, and re-run deterministic `/verify`.
+- Approved goal results include a lifecycle summary with user-visible statuses such as `completed_verified`, `completed_after_convergence`, `completed_with_risks`, `needs_user_decision`, and `blocked`, plus phase markers for execution, verification, convergence, re-verification, and reporting.
+- Package API exports `runGatewayBridge()` from `openclaw-pilot/gateway` for a disabled-by-default OpenClaw Gateway bridge.
 - Plan artifacts: `goal.json`, `plan.md`, `events.jsonl`, and `final.md`.
 - Verification artifacts: `verification.json`, `events.jsonl`, and `final.md`.
 - Convergence artifacts: `conv.json`, `receipts.jsonl`, `events.jsonl`, `final.md`, and local round evidence updates.
-- Goal artifacts: `goal-run.json`, `events.jsonl`, `final.md`, plus `receipts.jsonl` and local step artifacts only after scoped approval.
-- Never executes shell tasks, mutates task files outside run artifacts, spawns agents, sends external messages, or routes Telegram commands.
-- The route command is a local exact-command adapter only. It does not attach Telegram or Gateway routing yet.
+- Goal artifacts: `goal-run.json`, `events.jsonl`, `final.md`, plus `receipts.jsonl`, `post-execution-evidence.json`, optional post-execution convergence artifacts, verification artifacts, lifecycle status, and step/runner artifacts only after scoped approval.
+- Shared lineage artifacts: each run appends `lineage.jsonl` in its artifact directory and `index/lineage.jsonl` in the state root so `/plan`, `/verify`, `/conv`, `/goal`, and approval records can be recovered with one common model.
+- By default the session runner is disabled. When enabled, it executes only the configured runner command under the approved plan and captures stdout/stderr/result artifacts.
+- Never sends external messages or owns Gateway lifecycle. Out-of-plan work must stop and be reported.
+- The route/live commands are local adapters. `runGatewayBridge()` is an importable bridge for Gateway wiring, but the package does not restart or modify OpenClaw Gateway.
 - Deterministic code checks schema, artifact existence, references, and explicit scope flags. It does not judge semantic quality by regex or hidden context.
 - Shipped profiles are `document_strategy` and `research`. Profiles set vocabulary, evidence expectations, and risk defaults only; core lifecycle behavior stays unchanged.
 - Installation and package usage details are in `docs/install.md`.
@@ -75,4 +86,13 @@ PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- conv fixtures/document_strate
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- goal fixtures/document_strategy/goal-request-approved.json
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- route --enabled "/plan Draft a strategy"
 PILOT_STATE_ROOT=/tmp/pilot-state npm run pilot -- live --enabled=/plan "/plan Draft a strategy"
+```
+
+Enable a session runner explicitly:
+
+```bash
+PILOT_SESSION_RUNNER_ENABLED=true \
+PILOT_SESSION_RUNNER_COMMAND=codex \
+PILOT_SESSION_RUNNER_ARGS_JSON='["exec","--ask-for-approval","never","--sandbox","workspace-write","-"]' \
+npm run pilot -- goal path/to/approved-runner-goal.json
 ```

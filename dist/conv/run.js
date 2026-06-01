@@ -3,6 +3,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createRunId, eventLine, prepareRunDirectory, renderConvMarkdown, writeJson } from "../artifacts.js";
 import { defaultStateRoot } from "../config.js";
 import { validateConvRequest } from "../schema/index.js";
+import { appendLineageRecord } from "../state/lineage.js";
+import { shortRunId } from "../state/run-index.js";
 function needsApproval(request) {
     return request.preflight.risk_class !== "low";
 }
@@ -129,6 +131,27 @@ export async function runConv(options) {
         artifact_dir: artifactDir,
         created_files: [...Object.values(files), ...rounds.map((round) => round.evidence_update)],
     };
+    const lineage = await appendLineageRecord(stateRoot, {
+        schema_version: "pilot.lineage.v0",
+        created_at: createdAt,
+        record_type: "run",
+        command: "/conv",
+        run_id: runId,
+        short_run_id: shortRunId(runId),
+        status,
+        state_root: stateRoot,
+        artifact_dir: artifactDir,
+        evidence_pointers: [...Object.values(files), ...rounds.map((round) => round.evidence_update)],
+        receipt_pointers: [files.receipts],
+        resume_hint: status === "completed"
+            ? "Use the convergence artifacts as updated evidence, then run /verify if a final verdict is needed."
+            : "Provide a safer or tighter anchor, more evidence, or a user decision before retrying /conv.",
+        metadata: {
+            anchor_id: request.anchor?.id || "",
+            rounds: String(rounds.length),
+        },
+    });
+    result.created_files = [...result.created_files, lineage.run_path];
     await writeJson(files.conv, result);
     await writeFile(files.receipts, receipts.map((receipt) => `${JSON.stringify(receipt)}\n`).join(""), "utf8");
     await writeFile(files.events, events.map(eventLine).join(""), "utf8");

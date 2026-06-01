@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { getGoalCapabilityRunner, goalCapabilityNames } from "../src/goal/capabilities.ts";
 import { runGoal } from "../src/goal/run.ts";
+import { validateGoalRequest } from "../src/schema/index.ts";
 import type { GoalRequest } from "../src/types.ts";
 
 async function tempRoot(prefix: string): Promise<string> {
@@ -71,8 +73,13 @@ test("pilot goal waits for scoped approval before execution", async () => {
   assert.equal(result.status, "awaiting_approval");
   assert.equal(result.steps.length, 0);
   assert.equal(await fileExists(join(result.artifact_dir, "goal-run.json")), true);
+  assert.equal(await fileExists(join(result.artifact_dir, "lineage.jsonl")), true);
+  assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), false);
   assert.equal(await fileExists(join(result.artifact_dir, "step-1-goal-artifact.md")), false);
+  const draftLineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
+  assert.ok(draftLineage.includes('"command":"/goal"'));
+  assert.match(draftLineage, /"status":"awaiting_approval"/);
 });
 
 test("pilot goal executes approved low-risk scoped artifact capability", async () => {
@@ -100,12 +107,86 @@ test("pilot goal executes approved low-risk scoped artifact capability", async (
   assert.equal(result.steps[0].capability, "create_artifact");
   assert.ok(result.created_files.includes(result.steps[0].artifact_path));
   assert.ok(result.created_files.includes(join(result.artifact_dir, "receipts.jsonl")));
+  assert.ok(result.created_files.includes(join(result.artifact_dir, "lineage.jsonl")));
   assert.equal(await fileExists(join(result.artifact_dir, "step-1-goal-artifact.md")), true);
 
   const receipts = await readFile(join(result.artifact_dir, "receipts.jsonl"), "utf8");
   assert.match(receipts, /"schema_version":"pilot.receipt.v0"/);
   assert.match(receipts, /"approval_reference":"approval-001"/);
   assert.match(receipts, /"capability":"create_artifact"/);
+  const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
+  assert.match(lineage, /"approval_reference":"approval-001"/);
+  assert.match(lineage, /"receipt_pointers":/);
+});
+
+test("pilot goal creates approved local Pilot receipts dashboard prototype", async () => {
+  const root = await tempRoot("pilot-goal-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const seedRunDir = join(stateRoot, "runs", "20260601T000000Z-seeded-receipt");
+  await mkdir(seedRunDir, { recursive: true });
+  await writeFile(
+    join(seedRunDir, "receipts.jsonl"),
+    `${JSON.stringify({
+      schema_version: "pilot.receipt.v0",
+      action: "create_scoped_goal_artifact",
+      capability: "create_artifact",
+      run_id: "20260601T000000Z-seeded-receipt",
+      step: 1,
+      artifact_path: join(seedRunDir, "step-1-goal-artifact.md"),
+      status: "ok",
+      actor: "pilot.local",
+      timestamp: "2026-06-01T00:00:00.000Z",
+      primary_proof: true,
+    })}\n`,
+    "utf8",
+  );
+  const request = baseGoalRequest();
+  request.goal.statement = "Create a local Pilot receipts dashboard prototype.";
+  request.plan.action_boundaries.allowed_actions = ["create_pilot_receipts_dashboard"];
+  request.preflight.typed_capabilities = ["create_pilot_receipts_dashboard"];
+  request.approval = {
+    reference: "approval-dashboard-001",
+    approved: true,
+    approved_scope: ["Create a local self-contained Pilot receipts dashboard in the goal run artifact directory."],
+    approved_capabilities: ["create_pilot_receipts_dashboard"],
+  };
+  const requestPath = join(root, "goal.json");
+  await writeJson(requestPath, request);
+
+  const result = await runGoal({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:01:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.steps.length, 1);
+  assert.equal(result.steps[0].capability, "create_pilot_receipts_dashboard");
+  assert.ok(result.steps[0].artifact_path.endsWith("pilot-receipts-dashboard.html"));
+  assert.equal(await fileExists(result.steps[0].artifact_path), true);
+
+  const dashboard = await readFile(result.steps[0].artifact_path, "utf8");
+  assert.match(dashboard, /Pilot Receipts Dashboard/);
+  assert.match(dashboard, /create_artifact/);
+  const receipts = await readFile(join(result.artifact_dir, "receipts.jsonl"), "utf8");
+  assert.match(receipts, /"capability":"create_pilot_receipts_dashboard"/);
+});
+
+test("goal capability registry stays aligned with executable schema capabilities", () => {
+  for (const capability of goalCapabilityNames) {
+    const request = baseGoalRequest();
+    request.plan.action_boundaries.allowed_actions = [capability];
+    request.preflight.typed_capabilities = [capability];
+    request.approval = {
+      reference: `approval-${capability}`,
+      approved: true,
+      approved_scope: ["Create one local artifact in the run directory."],
+      approved_capabilities: [capability],
+    };
+
+    assert.equal(typeof getGoalCapabilityRunner(capability), "function");
+    assert.deepEqual(validateGoalRequest(request), []);
+  }
 });
 
 test("pilot goal rejects overbroad approval boundaries", async () => {
@@ -157,7 +238,7 @@ test("pilot goal refuses dangerous or unsupported capabilities", async () => {
   assert.ok(result.findings.some((finding) => finding.message.includes("dangerous")));
 });
 
-test("pilot goal requires separate approval for higher-risk goals", async () => {
+test("pilot goal executes approved higher-risk goals when the concrete plan covers the action", async () => {
   const root = await tempRoot("pilot-goal-");
   const stateRoot = await tempRoot("pilot-state-");
   const request = baseGoalRequest();
@@ -177,9 +258,171 @@ test("pilot goal requires separate approval for higher-risk goals", async () => 
     now: new Date("2026-06-01T00:00:00.000Z"),
   });
 
-  assert.equal(result.status, "needs_user_decision");
-  assert.equal(result.steps.length, 0);
-  assert.ok(result.findings.some((finding) => finding.code === "explicit_high_risk_approval_required"));
+    assert.equal(result.status, "completed");
+    assert.equal(result.steps.length, 1);
+    assert.equal(result.steps[0].capability, "create_artifact");
+    assert.ok(result.findings.some((finding) => finding.code === "structural_evidence_sufficient"));
+    assert.equal(result.post_execution_verification?.verdict, "sufficient_evidence");
+    assert.equal(result.lifecycle?.user_status, "completed_verified");
+    assert.equal(result.lifecycle?.current_phase, "report");
+    assert.ok(result.created_files.some((path) => path.endsWith("post-execution-evidence.json")));
+    assert.ok(result.created_files.some((path) => path.endsWith("verification.json")));
+});
+
+test("pilot goal runs approved session runner vertical slice with recorded evidence", async () => {
+  const previousEnv = {
+    enabled: process.env.PILOT_SESSION_RUNNER_ENABLED,
+    command: process.env.PILOT_SESSION_RUNNER_COMMAND,
+    args: process.env.PILOT_SESSION_RUNNER_ARGS_JSON,
+    timeout: process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS,
+  };
+  const root = await tempRoot("pilot-goal-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseGoalRequest();
+  request.preflight.risk_class = "high";
+  request.preflight.typed_capabilities = ["run_codex_session"];
+  request.plan.action_boundaries.allowed_actions = ["run_codex_session"];
+  request.plan.action_boundaries.approval_required_actions = ["execute the approved Codex/session runner task"];
+  request.plan.verification_gates = ["runner-result.json exists", "runner-stdout.txt exists", "receipts.jsonl records execution"];
+  request.approval = {
+    reference: "approval-runner-001",
+    approved: true,
+    approved_scope: ["Execute the approved runner task and report results."],
+    approved_capabilities: ["run_codex_session"],
+  };
+  const requestPath = join(root, "goal.json");
+  await writeJson(requestPath, request);
+
+  process.env.PILOT_SESSION_RUNNER_ENABLED = "true";
+  process.env.PILOT_SESSION_RUNNER_COMMAND = process.execPath;
+  process.env.PILOT_SESSION_RUNNER_ARGS_JSON = JSON.stringify([
+    "-e",
+    "process.stdin.resume(); process.stdin.on('end', () => { console.log('runner ok'); });",
+  ]);
+  process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = "5000";
+
+  try {
+    const result = await runGoal({
+      requestPath,
+      stateRoot,
+      now: new Date("2026-06-01T00:02:00.000Z"),
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(result.steps.length, 1);
+    assert.equal(result.steps[0].capability, "run_codex_session");
+    assert.equal(result.post_execution_verification?.verdict, "sufficient_evidence");
+    assert.equal(result.lifecycle?.user_status, "completed_verified");
+    assert.ok(result.created_files.some((path) => path.endsWith("runner-result.json")));
+    assert.ok(result.created_files.some((path) => path.endsWith("runner-prompt.md")));
+    assert.ok(result.created_files.some((path) => path.endsWith("runner-stdout.txt")));
+    assert.ok(result.created_files.some((path) => path.endsWith("post-execution-evidence.json")));
+    assert.ok(result.created_files.some((path) => path.endsWith("verification.json")));
+    const runnerResult = await readFile(join(result.artifact_dir, "runner-result.json"), "utf8");
+    assert.match(runnerResult, /"schema_version": "pilot.runner_result.v0"/);
+    assert.match(runnerResult, /"status": "ok"/);
+    assert.match(runnerResult, /"exit_code": 0/);
+    const stdout = await readFile(join(result.artifact_dir, "runner-stdout.txt"), "utf8");
+    assert.match(stdout, /runner ok/);
+    const receipts = await readFile(join(result.artifact_dir, "receipts.jsonl"), "utf8");
+    assert.match(receipts, /"capability":"run_codex_session"/);
+    const final = await readFile(join(result.artifact_dir, "final.md"), "utf8");
+    assert.match(final, /User Status: completed_verified/);
+    assert.match(final, /Lifecycle:/);
+    assert.match(final, /Post-Execution Verification/);
+    assert.match(final, /sufficient_evidence/);
+  } finally {
+    if (previousEnv.enabled === undefined) delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+    else process.env.PILOT_SESSION_RUNNER_ENABLED = previousEnv.enabled;
+    if (previousEnv.command === undefined) delete process.env.PILOT_SESSION_RUNNER_COMMAND;
+    else process.env.PILOT_SESSION_RUNNER_COMMAND = previousEnv.command;
+    if (previousEnv.args === undefined) delete process.env.PILOT_SESSION_RUNNER_ARGS_JSON;
+    else process.env.PILOT_SESSION_RUNNER_ARGS_JSON = previousEnv.args;
+    if (previousEnv.timeout === undefined) delete process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS;
+    else process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = previousEnv.timeout;
+  }
+});
+
+test("pilot goal runs bounded post-execution conv and re-verifies fixable findings", async () => {
+  const root = await tempRoot("pilot-goal-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseGoalRequest();
+  request.plan.verification_gates = [
+    "goal-run.json exists",
+    "receipts.jsonl records execution when approved",
+    "convergence note exists for post-execution gaps",
+  ];
+  request.approval = {
+    reference: "approval-conv-001",
+    approved: true,
+    approved_scope: ["Create one local artifact in the run directory."],
+    approved_capabilities: ["create_artifact"],
+  };
+  const requestPath = join(root, "goal.json");
+  await writeJson(requestPath, request);
+
+  const result = await runGoal({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:04:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.post_execution_verification?.verdict, "insufficient_evidence");
+  assert.equal(result.post_execution_convergence?.status, "completed");
+  assert.equal(result.post_execution_convergence?.rounds, 1);
+  assert.equal(result.post_convergence_verification?.verdict, "sufficient_evidence");
+  assert.equal(result.lifecycle?.user_status, "completed_after_convergence");
+  assert.equal(result.lifecycle?.steps.find((step) => step.phase === "converge")?.status, "completed");
+  assert.ok(result.findings.some((finding) => finding.code === "post_convergence_verification_sufficient"));
+  assert.ok(result.created_files.some((path) => path.endsWith("post-execution-conv-request.json")));
+  assert.ok(result.created_files.some((path) => path.endsWith("post-convergence-evidence.json")));
+  assert.ok(result.created_files.some((path) => path.endsWith("round-1-evidence-update.md")));
+
+  const final = await readFile(join(result.artifact_dir, "final.md"), "utf8");
+  assert.match(final, /User Status: completed_after_convergence/);
+  assert.match(final, /Post-Execution Convergence/);
+  assert.match(final, /Post-Convergence Verification/);
+  assert.match(final, /sufficient_evidence/);
+});
+
+test("pilot goal blocks approved session runner when runner env is disabled but keeps handoff artifacts", async () => {
+  const previousEnabled = process.env.PILOT_SESSION_RUNNER_ENABLED;
+  delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+  const root = await tempRoot("pilot-goal-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseGoalRequest();
+  request.preflight.risk_class = "high";
+  request.preflight.typed_capabilities = ["run_codex_session"];
+  request.plan.action_boundaries.allowed_actions = ["run_codex_session"];
+  request.plan.action_boundaries.approval_required_actions = ["execute the approved Codex/session runner task"];
+  request.approval = {
+    reference: "approval-runner-disabled-001",
+    approved: true,
+    approved_scope: ["Execute the approved runner task and report results."],
+    approved_capabilities: ["run_codex_session"],
+  };
+  const requestPath = join(root, "goal.json");
+  await writeJson(requestPath, request);
+
+  try {
+    const result = await runGoal({
+      requestPath,
+      stateRoot,
+      now: new Date("2026-06-01T00:03:00.000Z"),
+    });
+
+    assert.equal(result.status, "blocked");
+    assert.equal(result.steps.length, 0);
+    assert.ok(result.findings.some((finding) => finding.code === "goal_capability_runner_failed"));
+    assert.ok(result.created_files.some((path) => path.endsWith("runner-result.json")));
+    assert.ok(result.created_files.some((path) => path.endsWith("runner-prompt.md")));
+    const runnerResult = await readFile(join(result.artifact_dir, "runner-result.json"), "utf8");
+    assert.match(runnerResult, /runner_disabled/);
+  } finally {
+    if (previousEnabled === undefined) delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+    else process.env.PILOT_SESSION_RUNNER_ENABLED = previousEnabled;
+  }
 });
 
 test("vague pilot goal remains in plan semantics", async () => {

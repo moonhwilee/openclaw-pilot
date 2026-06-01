@@ -25,6 +25,43 @@ export type GoalRunStatus =
   | "needs_user_decision"
   | "blocked";
 
+export type GoalLifecyclePhase =
+  | "plan"
+  | "approve"
+  | "execute"
+  | "verify"
+  | "converge"
+  | "reverify"
+  | "report";
+
+export type GoalLifecycleStepStatus = "completed" | "skipped" | "blocked";
+
+export type GoalUserStatus =
+  | "awaiting_approval"
+  | "completed_verified"
+  | "completed_after_convergence"
+  | "completed_with_risks"
+  | "needs_evidence"
+  | "needs_revision"
+  | "needs_user_decision"
+  | "blocked";
+
+export type GoalLifecycleStep = {
+  phase: GoalLifecyclePhase;
+  status: GoalLifecycleStepStatus;
+  detail: string;
+  run_id?: string;
+  artifact_dir?: string;
+};
+
+export type GoalLifecycleSummary = {
+  user_status: GoalUserStatus;
+  terminal_status: GoalRunStatus;
+  current_phase: GoalLifecyclePhase;
+  steps: GoalLifecycleStep[];
+  next_action: string;
+};
+
 export type ActionBoundaries = {
   allowed_actions: string[];
   approval_required_actions: string[];
@@ -221,6 +258,7 @@ export type GoalStep = {
   capability: string;
   action_summary: string;
   artifact_path: string;
+  supporting_artifacts?: string[];
   receipt_recorded: boolean;
 };
 
@@ -231,12 +269,40 @@ export type GoalRunResult = {
   request: GoalRequest;
   steps: GoalStep[];
   findings: VerificationFinding[];
+  lifecycle?: GoalLifecycleSummary;
+  post_execution_verification?: {
+    run_id: string;
+    verdict: VerificationVerdict;
+    artifact_dir: string;
+    evidence_packet_path: string;
+  };
+  post_execution_convergence?: {
+    run_id: string;
+    status: ConvStatus;
+    artifact_dir: string;
+    request_path: string;
+    rounds: number;
+  };
+  post_convergence_verification?: {
+    run_id: string;
+    verdict: VerificationVerdict;
+    artifact_dir: string;
+    evidence_packet_path: string;
+  };
   created_at: string;
   artifact_dir: string;
   created_files: string[];
 };
 
-export type RouteStatus = "routed" | "unavailable" | "awaiting_approval" | "needs_user_decision" | "blocked";
+export type RouteStatus =
+  | "routed"
+  | "approval_target_confirmed"
+  | "unavailable"
+  | "awaiting_approval"
+  | "needs_user_decision"
+  | "blocked";
+
+export type RouteCommand = "/plan" | "/verify" | "/conv" | "/goal" | "approve";
 
 export type RouteUserReport = {
   status: string;
@@ -245,10 +311,62 @@ export type RouteUserReport = {
   next_action: string;
 };
 
+export type PilotRunIndexEntry = {
+  schema_version: "pilot.run_index.v0";
+  created_at: string;
+  channel: string;
+  chat_id?: string;
+  sender_id?: string;
+  source_message_id?: string;
+  source_update_id?: string;
+  command: RouteResult["command"];
+  run_id: string;
+  short_run_id: string;
+  status: string;
+  artifact_dir: string;
+  next_action: string;
+};
+
+export type PilotApprovalEntry = {
+  schema_version: "pilot.approval.v0";
+  created_at: string;
+  channel: string;
+  chat_id?: string;
+  sender_id?: string;
+  source_message_id?: string;
+  source_update_id?: string;
+  reference: string;
+  run_id: string;
+  short_run_id: string;
+  artifact_dir: string;
+  status: "approved";
+  approved_scope: string[];
+  approved_capabilities: string[];
+  next_action: string;
+};
+
+export type PilotLineageRecord = {
+  schema_version: "pilot.lineage.v0";
+  created_at: string;
+  record_type: "run" | "approval";
+  command: RouteCommand;
+  run_id: string;
+  short_run_id: string;
+  status: string;
+  state_root: string;
+  artifact_dir: string;
+  parent_run_id?: string;
+  approval_reference?: string;
+  evidence_pointers: string[];
+  receipt_pointers?: string[];
+  resume_hint: string;
+  metadata?: Record<string, string>;
+};
+
 export type RouteResult = {
   schema_version: "pilot.route.v0";
   status: RouteStatus;
-  command: "/plan" | "/verify" | "/conv" | "/goal";
+  command: RouteCommand;
   enabled: boolean;
   fallback_message?: string;
   backend: "openclaw-pilot";
@@ -260,4 +378,15 @@ export type LiveAdapterResult = {
   schema_version: "pilot.live_adapter.v0";
   route: RouteResult;
   telegram_text: string;
+};
+
+export type GatewayBridgeResult = {
+  schema_version: "pilot.gateway_bridge.v0";
+  status: RouteStatus | "unsupported" | "unauthorized" | "failed" | "timeout";
+  live_routing_enabled: boolean;
+  enabled_commands: RouteResult["command"][];
+  route?: RouteResult;
+  telegram_text: string;
+  duration_ms: number;
+  error_code?: string;
 };

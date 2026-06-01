@@ -3,6 +3,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createRunId, eventLine, prepareRunDirectory, renderVerificationMarkdown, writeJson } from "../artifacts.js";
 import { defaultStateRoot } from "../config.js";
 import { validateEvidencePacket } from "../schema/index.js";
+import { appendLineageRecord } from "../state/lineage.js";
+import { shortRunId } from "../state/run-index.js";
 function hasArtifactPath(item) {
     return item.type === "artifact" && typeof item.path === "string" && item.path.trim().length > 0;
 }
@@ -127,5 +129,26 @@ export async function runVerify(options) {
     await writeJson(files.verification, result);
     await writeFile(files.events, events.map(eventLine).join(""), "utf8");
     await writeFile(files.final, renderVerificationMarkdown(result), "utf8");
+    const lineage = await appendLineageRecord(stateRoot, {
+        schema_version: "pilot.lineage.v0",
+        created_at: createdAt,
+        record_type: "run",
+        command: "/verify",
+        run_id: runId,
+        short_run_id: shortRunId(runId),
+        status: verdict,
+        state_root: stateRoot,
+        artifact_dir: artifactDir,
+        evidence_pointers: Object.values(files),
+        resume_hint: verdict === "sufficient_evidence"
+            ? "Use verification.json and final.md as proof for the claim."
+            : "Revise evidence or run /conv against fixable findings before re-verifying.",
+        metadata: {
+            claim_id: String(packet.claim?.id || ""),
+            profile: String(packet.claim?.profile || ""),
+        },
+    });
+    result.created_files = [...Object.values(files), lineage.run_path];
+    await writeJson(files.verification, result);
     return result;
 }

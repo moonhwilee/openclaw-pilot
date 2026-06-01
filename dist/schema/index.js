@@ -1,5 +1,6 @@
 import { isPhase1TerminalStatus } from "../state/index.js";
 import { isSupportedProfile } from "../profiles/index.js";
+import { goalCapabilityNames } from "../goal/capabilities.js";
 const broadActionGrants = [
     "use tools",
     "fix it",
@@ -137,10 +138,7 @@ const safeConvCapabilities = new Set([
     "local_artifact_note",
     "finding_status_update",
 ]);
-const safeGoalCapabilities = new Set([
-    "create_artifact",
-    "review_document",
-]);
+const safeGoalCapabilities = new Set(goalCapabilityNames);
 const dangerousCapabilityHints = [
     "external",
     "deploy",

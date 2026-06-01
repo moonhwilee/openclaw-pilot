@@ -130,13 +130,32 @@ export function renderConvMarkdown(result) {
     ].join("\n");
 }
 export function renderGoalRunMarkdown(result) {
+    const executionBoundary = result.request.preflight.typed_capabilities.includes("run_codex_session")
+        ? "Execution boundary: approved Codex/session runner only. Stop required for actions outside the approved plan."
+        : "Execution boundary: scoped local goal artifacts only. No Telegram routing, external action, agent spawn, or dangerous action.";
+    const lifecycle = result.lifecycle;
     return [
         "# Pilot Goal Result",
         "",
         `Status: ${result.status}`,
+        ...(lifecycle
+            ? [
+                `User Status: ${lifecycle.user_status}`,
+                `Current Phase: ${lifecycle.current_phase}`,
+                `Next Action: ${lifecycle.next_action}`,
+            ]
+            : []),
         `Run ID: ${result.run_id}`,
         `Goal: ${result.request.goal.statement}`,
         "",
+        ...(lifecycle
+            ? [
+                "Lifecycle:",
+                "",
+                ...lifecycle.steps.map((step) => `- ${step.phase}: ${step.status} - ${step.detail}`),
+                "",
+            ]
+            : []),
         "Steps:",
         "",
         ...(result.steps.length
@@ -149,7 +168,25 @@ export function renderGoalRunMarkdown(result) {
             ? result.findings.map((finding) => `- ${finding.severity}: ${finding.code} - ${finding.message}`)
             : ["- none"]),
         "",
-        "Execution boundary: scoped local goal artifacts only. No Telegram routing, external action, agent spawn, or dangerous action.",
+        "Post-Execution Verification:",
+        "",
+        result.post_execution_verification
+            ? `- ${result.post_execution_verification.verdict}: ${result.post_execution_verification.run_id}`
+            : "- not run",
+        "",
+        "Post-Execution Convergence:",
+        "",
+        result.post_execution_convergence
+            ? `- ${result.post_execution_convergence.status}: ${result.post_execution_convergence.run_id} (${result.post_execution_convergence.rounds} rounds)`
+            : "- not run",
+        "",
+        "Post-Convergence Verification:",
+        "",
+        result.post_convergence_verification
+            ? `- ${result.post_convergence_verification.verdict}: ${result.post_convergence_verification.run_id}`
+            : "- not run",
+        "",
+        executionBoundary,
         "",
     ].join("\n");
 }
