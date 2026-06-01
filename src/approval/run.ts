@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { defaultStateRoot } from "../config.ts";
 import { appendApprovalEntry } from "../state/approval-index.ts";
 import { appendLineageRecord } from "../state/lineage.ts";
+import { isRecoveryRunCancelled } from "../state/recovery.ts";
 import { resolveRunIndexEntry } from "../state/run-index.ts";
 import type { GoalArtifact, PilotApprovalEntry, PilotRunIndexEntry } from "../types.ts";
 
@@ -196,6 +197,7 @@ export async function resolveApprovalTarget(
   }
 
   const entry = resolution.entry;
+  const cancelled = await isRecoveryRunCancelled(stateRoot, entry.run_id);
   const artifactPaths = requiredArtifactNames.map((name) => join(entry.artifact_dir, name));
   const missingArtifacts = (
     await Promise.all(
@@ -210,6 +212,9 @@ export async function resolveApprovalTarget(
 
   const goal = await readGoalArtifact(join(entry.artifact_dir, "goal.json"));
   const validationRisks: string[] = [];
+  if (cancelled) {
+    validationRisks.push(`Pilot run is cancelled: ${entry.short_run_id}.`);
+  }
   if (missingArtifacts.length > 0) {
     validationRisks.push(`Missing plan artifacts: ${missingArtifacts.join(", ")}.`);
   }

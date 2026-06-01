@@ -1,5 +1,15 @@
 import { runRoute } from "../route/run.js";
-const exactCommands = ["/plan", "/verify", "/conv", "/goal", "approve"];
+const exactCommands = [
+    "/plan",
+    "/verify",
+    "/conv",
+    "/goal",
+    "approve",
+    "list",
+    "status",
+    "resume",
+    "cancel",
+];
 const exactCommandSet = new Set(exactCommands);
 const maxReplyTextLength = 3900;
 function firstToken(input) {
@@ -86,6 +96,11 @@ export async function runPilotCommand(request) {
     const typedCommand = command;
     const enabled = request.enabledCommands?.includes(typedCommand) ||
         (typedCommand === "approve" && (request.enabledCommands?.includes("/plan") || request.enabledCommands?.includes("/goal"))) ||
+        ((typedCommand === "list" ||
+            typedCommand === "status" ||
+            typedCommand === "resume" ||
+            typedCommand === "cancel") &&
+            (request.enabledCommands?.includes("/plan") || request.enabledCommands?.includes("/goal"))) ||
         false;
     try {
         const route = await runRoute({ input: request.input, enabled, metadata: request.metadata });

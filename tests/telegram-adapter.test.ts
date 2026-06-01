@@ -80,6 +80,28 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.match(approval.telegram_text, /Status: completed_verified/);
     assert.match(approval.telegram_text, /Phase: report/);
     assert.match(approval.telegram_text, /receipts\.jsonl/);
+
+    const status = await runTelegramAdapter({
+      message: {
+        text: `status ${indexEntry.short_run_id}`,
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23022",
+        update_id: "99003",
+        timestamp: "2026-06-01T03:57:00+09:00",
+        chat_type: "direct",
+      },
+      enabledCommands: ["/plan"],
+      authorization: {
+        allowedChatIds: ["343580315"],
+      },
+    });
+
+    assert.equal(status.authorized, true);
+    assert.equal(status.command_result?.status, "routed");
+    assert.equal(status.route?.command, "status");
+    assert.match(status.telegram_text, /Status: approved/);
+    assert.match(status.telegram_text, /Command: status/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
