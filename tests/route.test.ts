@@ -162,6 +162,64 @@ test("recovery list and status inspect recent Pilot runs without mutating execut
   }
 });
 
+test("recovery commands surface copyable full run ids when a short id is ambiguous", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const firstRunId = "20260601T000000Z-first-short-id-collision";
+    const secondRunId = "20260601T000000Z-second-short-id-collision";
+    const shortId = shortRunId(firstRunId);
+    assert.equal(shortId, shortRunId(secondRunId));
+
+    for (const [index, runId] of [firstRunId, secondRunId].entries()) {
+      const artifactDir = join(stateRoot, "runs", runId);
+      await mkdir(artifactDir, { recursive: true });
+      await appendRunIndexEntry(stateRoot, {
+        schema_version: "pilot.run_index.v0",
+        created_at: new Date(`2026-06-01T00:00:0${index}.000Z`).toISOString(),
+        channel: "telegram",
+        chat_id: "343580315",
+        sender_id: "343580315",
+        source_message_id: `collision-${index}`,
+        source_update_id: `collision-${index}`,
+        command: "/plan",
+        run_id: runId,
+        short_run_id: shortId,
+        status: "plan_created",
+        artifact_dir: artifactDir,
+        next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+      });
+    }
+
+    const status = await runRoute({ input: `status ${shortId}`, enabled: true });
+    assert.equal(status.status, "needs_user_decision");
+    assert.equal(status.user_report.status, "recovery_ambiguous");
+    assert.ok(status.user_report.evidence_pointers.some((pointer) => pointer.includes(`retry="status ${firstRunId}"`)));
+    assert.ok(status.user_report.evidence_pointers.some((pointer) => pointer.includes(`retry="status ${secondRunId}"`)));
+    assert.ok(status.user_report.remaining_risks.some((risk) => risk.includes("Short run ids are time handles")));
+    assert.match(status.user_report.next_action, new RegExp(`status ${firstRunId}`));
+
+    const resume = await runRoute({ input: `resume ${shortId}`, enabled: true });
+    assert.equal(resume.status, "needs_user_decision");
+    assert.equal(resume.user_report.status, "recovery_resume_ambiguous");
+    assert.ok(resume.user_report.evidence_pointers.some((pointer) => pointer.includes(`retry="resume ${firstRunId}"`)));
+    assert.match(resume.user_report.next_action, new RegExp(`resume ${firstRunId}`));
+
+    const cancel = await runRoute({ input: `cancel ${shortId} duplicate`, enabled: true });
+    assert.equal(cancel.status, "needs_user_decision");
+    assert.equal(cancel.user_report.status, "recovery_cancel_ambiguous");
+    assert.ok(cancel.user_report.evidence_pointers.some((pointer) => pointer.includes(`retry="cancel ${firstRunId}"`)));
+    assert.match(cancel.user_report.next_action, new RegExp(`cancel ${firstRunId}`));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("recovery cancel marks a run and blocks later approval", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();

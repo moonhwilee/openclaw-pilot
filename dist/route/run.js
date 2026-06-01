@@ -133,6 +133,23 @@ function recoveryStatusRisks(run) {
         return [run.recovery.hint];
     return ["none"];
 }
+function recoveryCandidateLine(command, run) {
+    return [
+        `short=${run.short_run_id}`,
+        `status=${run.status}`,
+        `command=${run.command}`,
+        `created=${run.created_at}`,
+        `retry="${command} ${run.run_id}"`,
+        `artifact_dir=${run.artifact_dir}`,
+    ].join(" ");
+}
+function ambiguousRecoveryReport(command, reportStatus, reference, matches) {
+    const example = matches[0]?.run_id ? `${command} ${matches[0].run_id}` : `${command} <full-run-id>`;
+    return userReport(reportStatus, matches.map((run) => recoveryCandidateLine(command, run)), [
+        `Run reference ${reference} matched ${matches.length} Pilot runs.`,
+        "Short run ids are time handles and can collide; use a full run_id or a longer exact reference.",
+    ], `Retry with one full run_id, for example: ${example}.`);
+}
 function checkpointSummary(checkpoint) {
     return {
         phase: checkpoint.phase,
@@ -834,7 +851,7 @@ export async function runRoute(options) {
                 count: runs.length,
                 runs,
             },
-            user_report: userReport("recovery_list", runs.map((run) => `${run.short_run_id} ${run.status} ${run.artifact_dir}`), runs.length === 0
+            user_report: userReport("recovery_list", runs.map((run) => `${run.short_run_id} ${run.status} ${run.run_id} ${run.artifact_dir}`), runs.length === 0
                 ? ["No Pilot runs found in the current state root."]
                 : runs.some((run) => run.recovery.status === "stale")
                     ? ["One or more Pilot runs are stale; use status <Run> or resume <Run> for recovery guidance."]
@@ -870,7 +887,7 @@ export async function runRoute(options) {
                     reference: resolution.reference,
                     matches: resolution.matches,
                 },
-                user_report: userReport("recovery_ambiguous", resolution.matches.map((run) => `${run.short_run_id} ${run.run_id}`), [`Run reference ${resolution.reference} matched multiple Pilot runs.`], "Retry status with the full run_id."),
+                user_report: ambiguousRecoveryReport("status", "recovery_ambiguous", resolution.reference, resolution.matches),
             };
         }
         const run = resolution.run;
@@ -914,7 +931,7 @@ export async function runRoute(options) {
                     reference: resolution.reference,
                     matches: resolution.matches,
                 },
-                user_report: userReport("recovery_resume_ambiguous", resolution.matches.map((run) => `${run.short_run_id} ${run.run_id}`), [`Run reference ${resolution.reference} matched multiple Pilot runs.`], "Retry resume with the full run_id."),
+                user_report: ambiguousRecoveryReport("resume", "recovery_resume_ambiguous", resolution.reference, resolution.matches),
             };
         }
         const run = resolution.run;
@@ -991,7 +1008,7 @@ export async function runRoute(options) {
                     reference: cancellation.reference,
                     matches: cancellation.matches,
                 },
-                user_report: userReport("recovery_cancel_ambiguous", cancellation.matches.map((run) => `${run.short_run_id} ${run.run_id}`), [`Run reference ${cancellation.reference} matched multiple Pilot runs.`], "Retry cancel with the full run_id."),
+                user_report: ambiguousRecoveryReport("cancel", "recovery_cancel_ambiguous", cancellation.reference, cancellation.matches),
             };
         }
         if (cancellation.status === "not_cancelable") {

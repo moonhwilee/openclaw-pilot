@@ -10,7 +10,7 @@ Current workspace roadmap and TODO are tracked in
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.0
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.1
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
