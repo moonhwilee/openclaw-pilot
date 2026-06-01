@@ -4,6 +4,11 @@ Status: implemented safety contract
 Owner: Geumbi / Moonhwi Lee
 Target release: v0.2.11
 
+v0.2.12 amendment: broad versioned implementation-review `/verify` requests do
+not stop with generic evidence guidance. They create `verify_plan_created`, keep
+the recognized version scope, and wait for approval before evidence collection
+or runner-backed review.
+
 ## Purpose
 
 Pilot user-facing commands must treat natural language as the default product
@@ -71,7 +76,12 @@ Rules:
 - Broad natural `/verify` must not silently bind to the newest run.
 - `/verify recent` or `/verify <run>` must not report a deterministic-only
   artifact check as implementation-quality review.
-- If review evidence/scope is insufficient, return `needs_user_decision` with
+- If the user asks for a broad implementation review with explicit versions,
+  releases, updates, or implementation-principle language, create an
+  approval-backed verification plan and return
+  `user_report.status = "verify_plan_created"`.
+- If review evidence/scope is still insufficient and cannot be converted into a
+  concrete review plan, return `needs_user_decision` with
   `user_report.status = "verify_needs_evidence"`.
 - If the user enters a JSON-looking path, return
   `user_report.status = "artifact_shortcut_disabled"` and point to
@@ -132,7 +142,9 @@ JSON examples belong only in maintainer/internal artifact sections.
 
 Required regression coverage:
 
-- Broad natural `/verify` returns `verify_needs_evidence`, not
+- Broad versioned implementation `/verify` returns `verify_plan_created`, not
+  generic `verify_needs_evidence` and not `sufficient_evidence`.
+- Underspecified natural `/verify` returns `verify_needs_evidence`, not
   `sufficient_evidence`.
 - Broad natural `/conv` returns `conv_needs_anchor_or_plan`, not a silent latest
   finding attachment.
@@ -160,6 +172,7 @@ Required regression coverage:
 - No fallback: pass. Missing/disabled artifact shortcuts stop with explicit
   guidance.
 - No request-prose execution: pass. Natural `/goal` stops at plan approval;
+  broad implementation `/verify` stops at a verification plan approval; generic
   natural `/verify` asks for evidence; natural `/conv` requires an anchor.
 - User honesty: pass. Mechanical artifact verification is separated from content
   review.

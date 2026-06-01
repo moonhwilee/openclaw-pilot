@@ -268,7 +268,7 @@ test("/verify recent target requires content-review evidence instead of determin
   }
 });
 
-test("broad natural /verify does not silently bind to the newest run", async () => {
+test("broad implementation /verify creates a scoped review plan instead of asking for generic evidence", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -276,13 +276,16 @@ test("broad natural /verify does not silently bind to the newest run", async () 
     await runPlan({ request: "Draft a broad verify regression plan." });
 
     const verify = await runRoute({
-      input: "/verify 0.2.8 0.2.9 0.2.10 구현 관점에서 놓친 부분과 오버엔지니어링 검토해줘",
+      input: "/verify 0.2.8 0.2.9 0.2.10 0.2.11 구현 관점에서 놓친 부분과 오버엔지니어링 검토해줘",
       enabled: true,
     });
 
-    assert.equal(verify.status, "needs_user_decision");
-    assert.equal(verify.user_report.status, "verify_needs_evidence");
-    assert.deepEqual(verify.user_report.evidence_pointers, []);
+    assert.equal(verify.status, "awaiting_approval");
+    assert.equal(verify.user_report.status, "verify_plan_created");
+    assert.match(verify.user_report.next_action, /approve \d{6}/);
+    assert.ok(verify.user_report.evidence_pointers.some((pointer) => pointer.endsWith("plan.md")));
+    assert.ok(verify.user_report.progress?.some((line) => line.includes("v0.2.8, v0.2.9, v0.2.10, v0.2.11")));
+    assert.deepEqual(verify.result_summary?.version_scope, ["v0.2.8", "v0.2.9", "v0.2.10", "v0.2.11"]);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|Findings: none|natural-verify-evidence-packet/);
   } finally {
     if (previousStateRoot === undefined) {

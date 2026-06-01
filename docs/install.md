@@ -10,7 +10,7 @@ Current workspace roadmap and TODO live at
 Install from the current GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.11
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.12
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -100,10 +100,12 @@ appends a cancellation lineage record, and blocks later `approve` or `/goal
 Standalone natural `/conv` writes an internal `conv-request.json` and
 `conv-checkpoint.json` only when a concrete run or recent alias provides a clear
 verification anchor. Broad prose asks for an anchor or a goal plan instead.
-Standalone user-facing `/verify` means content review; when evidence scope is
-insufficient it returns `verify_needs_evidence` instead of presenting a
-mechanical artifact check as implementation approval. Mechanical JSON checks
-remain rerunnable through `pilot artifact verify`; the
+Standalone user-facing `/verify` means content review. Broad versioned
+implementation-review requests create a scoped verification plan and wait for
+approval before evidence collection or runner-backed review. When evidence
+scope is still insufficient it returns `verify_needs_evidence` instead of
+presenting a mechanical artifact check as implementation approval. Mechanical
+JSON checks remain rerunnable through `pilot artifact verify`; the
 `pilot.verify_checkpoint.v0` contract is reserved for future long verification
 that needs criteria/evidence-level resume.
 

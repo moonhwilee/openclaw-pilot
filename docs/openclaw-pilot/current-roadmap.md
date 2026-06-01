@@ -1,13 +1,13 @@
 # OpenClaw Pilot Current Roadmap
 
-Status: v0.2.11 safety hotfix in progress
+Status: v0.2.12 implementation-review verify hotfix in progress
 Owner: Geumbi / Moonhwi Lee
 
 ## Current Release
 
-- Current shipped release: v0.2.10
-- Current target: v0.2.11
-- Release theme: user-facing natural command safety
+- Current shipped release: v0.2.11
+- Current target: v0.2.12
+- Release theme: broad implementation `/verify` creates scoped review plans
 
 ## v0.2.11 Scope
 
@@ -23,6 +23,17 @@ Owner: Geumbi / Moonhwi Lee
 - User-facing progress output avoids `semantic` wording and distinguishes content
   review from mechanical artifact checks.
 
+## v0.2.12 Scope
+
+- Broad implementation-review `/verify` requests with explicit versions,
+  releases, or implementation-principle language create `verify_plan_created`.
+- The generated plan preserves the version scope and stops for explicit approval
+  before evidence collection or runner-backed review.
+- Telegram/live handoff records the generated verification plan so
+  `approve <Run>` can resolve it.
+- Generic underspecified `/verify` still returns `verify_needs_evidence`; JSON
+  artifact execution remains maintainer-only through `pilot artifact`.
+
 ## Maintainer Artifact Commands
 
 ```bash
@@ -36,8 +47,8 @@ making JSON artifacts the default user experience.
 
 ## Next Work
 
-- Add a real content-review evidence collector for explicit version, PR, tag, and
-  run scopes.
+- Run and evaluate the approved broad implementation verification plan with the
+  real session runner.
 - Add criteria-level long verification checkpoints and resume behavior.
 - Improve `/conv` guidance so broad convergence requests can be converted into a
   clear `/goal` plan when no actionable finding exists.
