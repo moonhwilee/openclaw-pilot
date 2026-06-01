@@ -8,6 +8,11 @@ Current workspace roadmap and TODO are tracked in
 The next PilotLead UX and quality-loop implementation contract is documented
 in `docs/pilotlead-v0.2.8-product-contract.md`.
 
+The next natural-command UX contract is documented in
+`docs/natural-command-contract-v0.2.10.md`: user-facing examples should be
+natural-language-first, while JSON path forms remain advanced artifact
+shortcuts.
+
 ## Install
 
 From the current GitHub release:
