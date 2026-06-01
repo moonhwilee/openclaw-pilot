@@ -4,6 +4,14 @@ function requestLooksVague(request) {
     const trimmed = request.trim().toLowerCase();
     return trimmed.length < 12 || vagueRequests.has(trimmed);
 }
+function requestLooksVagueForMode(request, mode) {
+    const trimmed = request.trim().toLowerCase();
+    if (vagueRequests.has(trimmed))
+        return true;
+    if (mode === "verify" || mode === "conv")
+        return trimmed.length < 4;
+    return requestLooksVague(request);
+}
 function looksLikeLargeImplementation(request) {
     const normalized = request.toLowerCase();
     return requiresCodexRunner(request) || [
@@ -72,8 +80,236 @@ function buildGoalPhasePlan(request, runCodex) {
         },
     ];
 }
-export function buildPlan(request) {
-    const vague = requestLooksVague(request);
+function normalizeBuildPlanInput(input) {
+    if (typeof input === "string")
+        return { request: input, mode: "plan" };
+    return { request: input.request, mode: input.mode || "plan", anchor: input.anchor };
+}
+function modeGoal(mode, request) {
+    const trimmed = request.trim();
+    if (mode === "goal")
+        return trimmed;
+    if (mode === "verify")
+        return `Verify: ${trimmed}`;
+    if (mode === "conv")
+        return `Converge: ${trimmed}`;
+    return trimmed;
+}
+function modeOutcomeSummary(mode, vague) {
+    if (vague)
+        return "Pilot needs a sharper target before it can produce an approval-ready plan.";
+    if (mode === "verify") {
+        return "Pilot will create an approval-ready verification plan; evidence collection and review remain blocked until the typed execution plan is explicitly approved.";
+    }
+    if (mode === "conv") {
+        return "Pilot will create an approval-ready convergence plan; fixes, file edits, and convergence execution remain blocked until the typed execution plan is explicitly approved.";
+    }
+    if (mode === "goal") {
+        return "Pilot will create an approval-ready goal execution plan first; execution remains blocked until the typed execution plan is explicitly approved.";
+    }
+    return "Pilot will create an approval-ready plan first; execution remains blocked until the typed execution plan is explicitly approved.";
+}
+function modeContextSummary(mode, phasePlan, anchor) {
+    return [
+        `Command mode: ${mode}. The explicit command selects the planning mode; Pilot does not re-route natural prose with a keyword fallback.`,
+        anchor
+            ? `Mechanical anchor: ${anchor.kind} ${anchor.short_reference || anchor.reference}. The anchor narrows context but does not authorize execution.`
+            : "No mechanical anchor was required; the natural request is interpreted inside the selected command mode.",
+        "The human-readable plan is guidance; the typed execution-plan hash remains the only execution authority.",
+        phasePlan.length
+            ? "This request looks broad enough to require phase-gated planning and small implementation slices."
+            : "This request is small enough to start as a single planning loop unless later context expands the risk.",
+    ];
+}
+function modeScope(mode) {
+    if (mode === "verify") {
+        return [
+            "Create a local verification planning artifact only.",
+            "Define evidence scope, review criteria, reviewer boundary, collection plan, and reporting expectations.",
+            "Preserve no legacy, no fallback, and no request-prose execution as verification gates.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Create a local convergence planning artifact only.",
+            "Define the target finding or design gap, expected convergence path, risk boundary, and re-verification gate.",
+            "Keep implementation, file edits, and convergence rounds behind explicit approval.",
+        ];
+    }
+    if (mode === "goal") {
+        return [
+            "Create a local goal execution planning artifact only.",
+            "Define goal, scope, success criteria, risks, action boundaries, and verification gates.",
+            "Prepare a typed execution plan that can be approved explicitly before any execution.",
+        ];
+    }
+    return [
+        "Create a local planning artifact only.",
+        "Define goal, scope, success criteria, risks, action boundaries, and verification gates.",
+        "Use the document_strategy profile for planning vocabulary and risk defaults.",
+    ];
+}
+function modeOutOfScope(mode) {
+    const common = [
+        "Mutate files outside the run artifact directory.",
+        "Spawn agents.",
+        "Send external messages or perform public actions.",
+    ];
+    if (mode === "verify") {
+        return [
+            "Collect evidence before approval.",
+            "Run reviewers or produce a pass/fail implementation verdict before approval.",
+            "Convert natural prose into a deterministic-only evidence packet.",
+            ...common,
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Execute convergence rounds before approval.",
+            "Bind broad prose to the newest finding as an implicit fallback.",
+            "Edit files or claim findings are reduced before approved execution.",
+            ...common,
+        ];
+    }
+    return [
+        "Execute tools or commands for the user's task.",
+        ...common,
+        "Route Telegram commands.",
+        mode === "goal" ? "Execute the goal before approval." : "Create /goal, /verify, or /conv behavior.",
+    ];
+}
+function modeSuccessCriteria(mode) {
+    const common = [
+        "A resumable run directory exists.",
+        "The four v0 artifacts are present.",
+        "The plan satisfies the Common Plan Contract.",
+        "Ambiguity is captured when the request is under-specified.",
+    ];
+    if (mode === "verify") {
+        return [
+            ...common,
+            "The verification plan names concrete evidence classes and review criteria.",
+            "No deterministic-only pass or generic run-id dead end is produced for natural verification prose.",
+            "No evidence collection or verdict occurs before approval.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            ...common,
+            "The convergence plan states whether it is anchored, needs clarification, or should become a goal execution plan.",
+            "No convergence round, file edit, or finding reduction occurs before approval.",
+        ];
+    }
+    return [...common, "No execution occurs."];
+}
+function modeRisks(mode) {
+    if (mode === "verify") {
+        return [
+            "The requested verification may need external evidence, GitHub state, runtime state, or reviewer work after approval.",
+            "This plan is not a verdict and must not be presented as implementation proof.",
+            "The implementation must reject broad action grants and fallback evidence shortcuts.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "The convergence target may be under-specified or lack an actionable finding anchor.",
+            "This plan is not a fix and must not be presented as reduced findings.",
+            "The implementation must reject implicit recent-finding fallback for broad prose.",
+        ];
+    }
+    return [
+        "The request may be incomplete and may require a user decision before later execution phases.",
+        "This v0 plan is a planning artifact, not approval to execute.",
+        "The implementation must reject broad action grants and execution attempts.",
+    ];
+}
+function modeApprovalRequiredActions(mode) {
+    if (mode === "verify") {
+        return [
+            "Collect evidence or inspect external/local project state.",
+            "Run semantic reviewers, Codex sessions, tests, smoke checks, or CI checks.",
+            "Write a verification verdict, findings report, PR review, release decision, or Gateway/runtime judgment.",
+            "Any file mutation outside the run artifact directory.",
+            "Any external message, public post, PR, deploy, release, restart, credential, or financial action.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Run convergence, edit files, spawn agents, or reduce findings.",
+            "Run tests, smoke checks, reviewer loops, or re-verification.",
+            "Any file mutation outside the run artifact directory.",
+            "Any external message, public post, PR, deploy, release, restart, credential, or financial action.",
+        ];
+    }
+    return [
+        "Any future execution beyond local planning.",
+        "Any file mutation outside the run artifact directory.",
+        "Any external message, public post, PR, deploy, release, restart, credential, or financial action.",
+    ];
+}
+function modeVerificationGates(mode) {
+    if (mode === "verify") {
+        return [
+            "Validate the plan uses command mode verify rather than route keyword fallback.",
+            "Validate evidence scope and review criteria are explicit.",
+            "Validate no evidence packet fallback, deterministic-only pass, or verdict artifact is produced before approval.",
+            "Validate execution-plan hash is required before any evidence collection or reviewer work.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Validate the plan uses command mode conv rather than implicit recent-finding fallback.",
+            "Validate convergence target, risk boundary, and re-verification gate are explicit.",
+            "Validate no natural-conv request, conv result, file edit, or finding reduction is produced before approval.",
+            "Validate execution-plan hash is required before convergence execution.",
+        ];
+    }
+    return [
+        "Validate goal.json schema fields.",
+        "Validate plan.md contains the Common Plan Contract sections.",
+        "Validate events.jsonl records lifecycle events.",
+        "Validate final.md reports planning-only completion.",
+        "Validate no execution artifacts are produced.",
+    ];
+}
+function modeNextStep(mode, vague) {
+    if (vague)
+        return `Answer the ambiguity questions, then rerun /${mode} with a concrete request.`;
+    if (mode === "verify")
+        return "Review the verification plan, then approve the plan only if Pilot should collect evidence and run review work.";
+    if (mode === "conv")
+        return "Review the convergence plan, then approve the plan only if Pilot should execute convergence work.";
+    if (mode === "goal")
+        return "Review the goal plan, then approve the plan only if Pilot should execute the goal.";
+    return "Review the plan artifact before any later phase attempts execution.";
+}
+function modeDetailedTaskBreakdown(mode) {
+    if (mode === "verify") {
+        return [
+            "Create the run directory.",
+            "Write the verification-mode planning artifacts.",
+            "Define evidence classes, review criteria, and no-fallback gates.",
+            "Stop before evidence collection or verdict generation.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Create the run directory.",
+            "Write the convergence-mode planning artifacts.",
+            "Define target, convergence path, risk boundary, and re-verification gate.",
+            "Stop before convergence execution.",
+        ];
+    }
+    return [
+        "Create the run directory.",
+        "Write the v0 artifacts.",
+        "Validate the Common Plan Contract.",
+        "Stop without execution.",
+    ];
+}
+export function buildPlan(input) {
+    const { request, mode, anchor } = normalizeBuildPlanInput(input);
+    const vague = requestLooksVagueForMode(request, mode);
     const codexRunnerLikely = !vague && requiresCodexRunner(request);
     const phasePlan = vague ? [] : buildGoalPhasePlan(request, codexRunnerLikely);
     const ambiguityQuestions = vague
@@ -85,49 +321,16 @@ export function buildPlan(request) {
         : [];
     const status = vague ? "needs_user_decision" : "completed_plan";
     const plan = {
-        goal: vague ? "Clarify the requested planning goal before execution." : request.trim(),
-        outcome_summary: vague
-            ? "Pilot needs a sharper target before it can produce an approval-ready plan."
-            : "Pilot will create an approval-ready plan first; execution remains blocked until the typed execution plan is explicitly approved.",
-        context_summary: [
-            "Pilot has only the user request and local Pilot planning contract at this stage.",
-            "The human-readable plan is guidance; the typed execution-plan hash remains the only execution authority.",
-            phasePlan.length
-                ? "This request looks broad enough to require phase-gated planning and small implementation slices."
-                : "This request is small enough to start as a single planning loop unless later context expands the risk.",
-        ],
-        scope: [
-            "Create a local planning artifact only.",
-            "Define goal, scope, success criteria, risks, action boundaries, and verification gates.",
-            "Use the document_strategy profile for planning vocabulary and risk defaults.",
-        ],
-        out_of_scope: [
-            "Execute tools or commands for the user's task.",
-            "Mutate files outside the run artifact directory.",
-            "Spawn agents.",
-            "Route Telegram commands.",
-            "Create /goal, /verify, or /conv behavior.",
-            "Send external messages or perform public actions.",
-        ],
-        success_criteria: [
-            "A resumable run directory exists.",
-            "The four v0 artifacts are present.",
-            "The plan satisfies the Common Plan Contract.",
-            "Ambiguity is captured when the request is under-specified.",
-            "No execution occurs.",
-        ],
-        risks_assumptions: [
-            "The request may be incomplete and may require a user decision before later execution phases.",
-            "This v0 plan is a planning artifact, not approval to execute.",
-            "The implementation must reject broad action grants and execution attempts.",
-        ],
+        goal: vague ? `Clarify the requested ${mode} goal before execution.` : modeGoal(mode, request),
+        outcome_summary: modeOutcomeSummary(mode, vague),
+        context_summary: modeContextSummary(mode, phasePlan, anchor),
+        scope: modeScope(mode),
+        out_of_scope: modeOutOfScope(mode),
+        success_criteria: modeSuccessCriteria(mode),
+        risks_assumptions: modeRisks(mode),
         action_boundaries: {
             allowed_actions: ["create_plan_artifact", "record_lifecycle_event"],
-            approval_required_actions: [
-                "Any future execution beyond local planning.",
-                "Any file mutation outside the run artifact directory.",
-                "Any external message, public post, PR, deploy, release, restart, credential, or financial action.",
-            ],
+            approval_required_actions: modeApprovalRequiredActions(mode),
             disallowed_actions: [
                 "execute_user_task",
                 "spawn_agent",
@@ -135,24 +338,11 @@ export function buildPlan(request) {
                 "shell_escape_as_proof",
             ],
         },
-        verification_gates: [
-            "Validate goal.json schema fields.",
-            "Validate plan.md contains the Common Plan Contract sections.",
-            "Validate events.jsonl records lifecycle events.",
-            "Validate final.md reports planning-only completion.",
-            "Validate no execution artifacts are produced.",
-        ],
+        verification_gates: modeVerificationGates(mode),
         phase_plan: phasePlan,
         ambiguity_questions: ambiguityQuestions,
-        next_recommended_step: vague
-            ? "Answer the ambiguity questions, then rerun pilot plan with a concrete request."
-            : "Review the plan artifact before any later phase attempts execution.",
-        detailed_task_breakdown: [
-            "Create the run directory.",
-            "Write the v0 artifacts.",
-            "Validate the Common Plan Contract.",
-            "Stop without execution.",
-        ],
+        next_recommended_step: modeNextStep(mode, vague),
+        detailed_task_breakdown: modeDetailedTaskBreakdown(mode),
     };
     return { status, ambiguityQuestions, plan };
 }
@@ -216,12 +406,12 @@ function requiresCodexRunner(request) {
         "리팩터",
     ].some((token) => normalized.includes(token));
 }
-export function buildExecutionPlan(request, planRunId, phasePlan) {
-    if (requestLooksVague(request))
+export function buildExecutionPlan(request, planRunId, phasePlan, mode = "plan", anchor) {
+    if (requestLooksVagueForMode(request, mode))
         return undefined;
     const capability = selectsPilotReceiptsDashboardStep(request)
         ? "create_pilot_receipts_dashboard"
-        : requiresCodexRunner(request)
+        : mode === "verify" || mode === "conv" || requiresCodexRunner(request)
             ? "run_codex_session"
             : "create_artifact";
     const riskClass = capability === "run_codex_session" ? "high" : "low";
@@ -244,7 +434,7 @@ export function buildExecutionPlan(request, planRunId, phasePlan) {
     return withExecutionPlanHash({
         schema_version: "pilot.execution_plan.v0",
         plan_run_id: planRunId,
-        goal_summary: request.trim(),
+        goal_summary: modeGoal(mode, request),
         goal_milestones: buildGoalMilestones(phasePlan),
         steps: [
             {
@@ -255,6 +445,8 @@ export function buildExecutionPlan(request, planRunId, phasePlan) {
                 inputs: {
                     plan_run_id: planRunId,
                     request,
+                    plan_mode: mode,
+                    ...(anchor ? { anchor } : {}),
                 },
                 expected_artifacts: capability === "run_codex_session"
                     ? ["runner-prompt.md", "runner-result.json", "runner-stdout.txt", "runner-stderr.txt"]

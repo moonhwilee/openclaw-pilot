@@ -7,13 +7,13 @@ import { executionPlanArtifactName, executionPlanCapabilities, executionPlanRisk
 import { buildPostConvergenceEvidencePacket, buildPostExecutionConvRequest, buildPostExecutionEvidencePacket, fixableVerificationVerdict, } from "../goal/post-execution.js";
 import { runGoal } from "../goal/run.js";
 import { runPlan } from "../plan/run.js";
-import { progressLinesForConv, progressLinesForGoal, progressLinesForRecovery, } from "../progress.js";
+import { progressLinesForGoal, progressLinesForRecovery, } from "../progress.js";
 import { profileExpectationSummary } from "../profiles/index.js";
 import { resolveApprovalEntry } from "../state/approval-index.js";
 import { cancelRecoveryRun, createResumeDirective, isRecoveryRunCancelled, listRecoveryRuns, resolveRecoveryRun, } from "../state/recovery.js";
 import { shortRunId } from "../state/run-index.js";
 import { defaultStateRoot } from "../config.js";
-import { latestRecoveryRun, looksLikeJsonPath, looksLikeRunReference as looksLikeTargetRunReference, resolveUserCommandTarget, writeConvRequestFromVerification, } from "./target.js";
+import { latestRecoveryRun, looksLikeJsonPath, looksLikeRunReference as looksLikeTargetRunReference, resolveUserCommandTarget, } from "./target.js";
 import { runVerify } from "../verify/run.js";
 const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "list", "status", "resume", "cancel"]);
 function userReport(status, evidencePointers, remainingRisks, nextAction, approvalPreview, progress) {
@@ -248,58 +248,97 @@ function targetNeedsRunReport(command, status, target, nextAction) {
         user_report: userReport(status, [], [target], nextAction),
     };
 }
-function versionScopesFromRequest(raw) {
-    return [...new Set((raw.match(/\bv?\d+\.\d+\.\d+\b/g) || []).map((version) => (version.startsWith("v") ? version : `v${version}`)))];
+function planModeCreatedStatus(mode) {
+    if (mode === "goal")
+        return "goal_plan_created";
+    if (mode === "verify")
+        return "verify_plan_created";
+    if (mode === "conv")
+        return "conv_plan_created";
+    return "plan_created";
 }
-function isImplementationReviewRequest(raw) {
-    const normalized = raw.toLowerCase();
-    const versions = versionScopesFromRequest(raw);
-    return (versions.length >= 2 ||
-        /구현|업데이트|릴리스|release|오버엔지니어링|overengineering|legacy|fallback|no legacy|no fallback|원칙|놓친|잘못된|side effect|사이드/.test(normalized));
+function planModeNeedsClarificationStatus(mode) {
+    if (mode === "goal")
+        return "goal_needs_clarification";
+    if (mode === "verify")
+        return "verify_needs_clarification";
+    if (mode === "conv")
+        return "conv_needs_clarification";
+    return "plan_needs_clarification";
 }
-function implementationReviewPlanRequest(raw) {
-    const versions = versionScopesFromRequest(raw);
-    const scope = versions.length ? versions.join(", ") : raw;
+function planModeLabel(mode) {
+    if (mode === "goal")
+        return "goal execution plan";
+    if (mode === "verify")
+        return "verification plan";
+    if (mode === "conv")
+        return "convergence plan";
+    return "plan";
+}
+function commandForPlanMode(mode) {
+    if (mode === "goal")
+        return "/goal";
+    if (mode === "verify")
+        return "/verify";
+    if (mode === "conv")
+        return "/conv";
+    return "/plan";
+}
+function planModeCompletedRisks(mode) {
+    if (mode === "verify") {
+        return [
+            "Verification has not run yet; this is the evidence-collection and review plan.",
+            "Approval is required before Pilot collects evidence, runs checks, or writes a verdict.",
+        ];
+    }
+    if (mode === "conv") {
+        return [
+            "Convergence has not run yet; this is the convergence execution plan.",
+            "Approval is required before Pilot edits files, runs convergence rounds, or claims findings are reduced.",
+        ];
+    }
+    if (mode === "goal") {
+        return ["Execution not performed. This command only created local goal planning artifacts."];
+    }
+    return ["Execution not performed. This command only created local plan artifacts."];
+}
+function planModeProgress(mode, anchor) {
     return [
-        `Verify OpenClaw Pilot implementation quality for ${scope}.`,
-        `Original user request: ${raw}`,
-        "Collect concrete evidence before judging: release/tag or PR scope, changed files, tests, smoke checks, docs, rollout state, and Gateway/runtime side effects when relevant.",
-        "Review for wrong behavior, missed impact, overengineering, implementation-principle violations, especially no legacy backend, no fallback execution, and no request-prose execution.",
-        "Return findings with severity, evidence pointers, residual risk, and a clear pass/fail/needs-work judgment.",
-    ].join(" ");
+        `Mode: ${planModeLabel(mode)}`,
+        "Router: command mode plus mechanical target only",
+        ...(anchor ? [`Anchor: ${anchor.kind} ${anchor.short_reference || anchor.reference}`] : ["Anchor: none"]),
+    ];
 }
-async function verifyImplementationReviewPlanRoute(raw) {
-    const result = await runPlan({ request: implementationReviewPlanRequest(raw) });
+async function commandModePlanRoute(mode, raw, anchor) {
+    const command = commandForPlanMode(mode);
+    const result = await runPlan({ request: raw, mode, anchor });
     const shortId = shortRunId(result.run_id);
     const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
-    const versions = versionScopesFromRequest(raw);
+    const visibleStatus = result.status === "completed_plan" ? planModeCreatedStatus(mode) : planModeNeedsClarificationStatus(mode);
     return {
         schema_version: "pilot.route.v0",
-        status: result.status === "completed_plan" ? "awaiting_approval" : "needs_user_decision",
-        command: "/verify",
+        status: result.status === "completed_plan" ? (mode === "plan" ? "routed" : "awaiting_approval") : "needs_user_decision",
+        command,
         enabled: true,
         backend: "openclaw-pilot",
         result_summary: {
-            status: "verify_plan_created",
+            status: visibleStatus,
+            plan_status: result.status,
+            plan_mode: mode,
             run_id: result.run_id,
             short_run_id: shortId,
             state_root: result.goal.state_root,
             artifact_dir: result.artifact_dir,
-            version_scope: versions,
+            anchor,
             created_files: result.created_files,
             plan_preview: planPreview(result.plan),
+            profile_expectations: profileExpectationSummary(result.goal.profile),
         },
-        user_report: userReport(result.status === "completed_plan" ? "verify_plan_created" : result.status, result.created_files, result.status === "needs_user_decision"
-            ? result.plan.ambiguity_questions || ["Verification plan requires a user decision before evidence collection."]
-            : [
-                "Implementation review has not run yet; this is the evidence-collection and review plan.",
-                "Approval is required before Pilot collects evidence or performs runner-backed review work.",
-            ], result.status === "needs_user_decision"
-            ? "Answer the ambiguity questions and rerun /verify."
-            : `Review the verification plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview, [
-            versions.length ? `Scope: ${versions.join(", ")}` : "Scope: natural implementation review request",
-            "Mode: implementation-quality verification plan",
-        ]),
+        user_report: userReport(visibleStatus, result.created_files, result.status === "needs_user_decision"
+            ? result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
+            : planModeCompletedRisks(mode), result.status === "needs_user_decision"
+            ? `Answer the ambiguity questions and rerun ${command}.`
+            : `Review the ${planModeLabel(mode)}. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview, planModeProgress(mode, anchor)),
     };
 }
 function artifactShortcutDisabledReport(command, path) {
@@ -377,18 +416,7 @@ async function resolveRunTarget(command, raw) {
         return { status: "needs_user_decision", route: artifactShortcutDisabledReport(command, target.path) };
     }
     if (target.kind === "natural_language") {
-        if (command === "/verify" && isImplementationReviewRequest(target.raw)) {
-            return {
-                status: "needs_user_decision",
-                route: await verifyImplementationReviewPlanRoute(target.raw),
-            };
-        }
-        return {
-            status: "needs_user_decision",
-            route: targetNeedsRunReport(command, command === "/verify" ? "verify_needs_evidence" : "conv_needs_anchor_or_plan", target.raw, command === "/verify"
-                ? "Provide a concrete run id/recent alias plus evidence scope, or run a focused /goal plan to collect review evidence first."
-                : "Provide a concrete run id/recent alias with verification findings, or create a /goal plan for the requested convergence work."),
-        };
+        return { status: "plan", request: target.raw };
     }
     const reference = target.kind === "run_reference"
         ? target.reference
@@ -426,7 +454,17 @@ async function resolveRunTarget(command, raw) {
             },
         };
     }
-    return { status: "run", run: resolution.run, natural_request: target.raw };
+    return {
+        status: "plan",
+        request: target.raw,
+        run: resolution.run,
+        anchor: {
+            kind: target.kind === "recent_alias" ? "recent" : "run",
+            reference: resolution.run.run_id,
+            short_reference: resolution.run.short_run_id,
+            artifact_dir: resolution.run.artifact_dir,
+        },
+    };
 }
 function checkpointSummary(checkpoint) {
     return {
@@ -1354,93 +1392,19 @@ export async function runRoute(options) {
     if (parsed.command === "/plan") {
         if (!parsed.rest)
             return usageRoute(parsed.command);
-        const result = await runPlan({ request: parsed.rest });
-        const shortId = shortRunId(result.run_id);
-        const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
-        return {
-            schema_version: "pilot.route.v0",
-            status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
-            command: parsed.command,
-            enabled: true,
-            backend: "openclaw-pilot",
-            result_summary: {
-                status: result.status,
-                run_id: result.run_id,
-                short_run_id: shortId,
-                state_root: result.goal.state_root,
-                artifact_dir: result.artifact_dir,
-                created_files: result.created_files,
-                plan_preview: planPreview(result.plan),
-                profile_expectations: profileExpectationSummary(result.goal.profile),
-            },
-            user_report: userReport(result.status === "completed_plan" ? "plan_created" : result.status, result.created_files, result.status === "needs_user_decision"
-                ? result.plan.ambiguity_questions || ["Plan requires user decision before any execution."]
-                : ["Execution not performed. This command only created local plan artifacts."], result.status === "needs_user_decision"
-                ? "Answer the ambiguity questions and rerun /plan."
-                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview),
-        };
+        return commandModePlanRoute("plan", parsed.rest);
     }
     if (parsed.command === "/verify") {
         const target = await resolveRunTarget(parsed.command, parsed.rest);
         if (target.status === "needs_user_decision")
             return target.route;
-        return {
-            schema_version: "pilot.route.v0",
-            status: "needs_user_decision",
-            command: parsed.command,
-            enabled: true,
-            backend: "openclaw-pilot",
-            result_summary: {
-                status: "verify_needs_evidence",
-                target_run_id: target.run.run_id,
-                target_short_run_id: target.run.short_run_id,
-                target_artifact_dir: target.run.artifact_dir,
-            },
-            user_report: userReport("verify_needs_evidence", [...target.run.available_artifacts, ...target.run.evidence_pointers], [
-                "User-facing /verify now means content review, not mechanical artifact existence checks.",
-                "This route will not silently convert a run into a deterministic-only pass.",
-            ], "Collect or cite the exact evidence scope for content review, or use pilot artifact verify <evidence-packet.json> for maintainer-only mechanical checks.", undefined, [`Run: ${target.run.short_run_id}`, "Verify: content review evidence required"]),
-        };
+        return commandModePlanRoute("verify", target.request, target.anchor);
     }
     if (parsed.command === "/conv") {
         const target = await resolveRunTarget(parsed.command, parsed.rest);
         if (target.status === "needs_user_decision")
             return target.route;
-        let requestPath;
-        let verification = await readVerificationResultIfExists(target.run.artifact_dir);
-        if (!verification) {
-            const goalRun = await readGoalRunIfExists(target.run.artifact_dir);
-            if (goalRun?.post_execution_verification?.artifact_dir) {
-                verification = await readVerificationResultIfExists(goalRun.post_execution_verification.artifact_dir);
-            }
-        }
-        if (!verification) {
-            return targetNeedsRunReport(parsed.command, "conv_needs_verification_anchor", target.natural_request, "Provide a run that already has verification findings, or create a /goal plan to gather the missing review evidence first.");
-        }
-        requestPath = await writeConvRequestFromVerification(target.run, verification, target.natural_request);
-        if (!requestPath) {
-            return targetNeedsRunReport(parsed.command, "conv_needs_actionable_findings", target.natural_request, "The target verification has no actionable findings to converge. Use status <Run> or create a narrower /goal if new work is needed.");
-        }
-        const result = await runConv({ requestPath });
-        const evidencePointers = [requestPath, ...result.created_files];
-        return {
-            schema_version: "pilot.route.v0",
-            status: result.status === "blocked" ? "blocked" : result.status === "needs_user_decision" ? "needs_user_decision" : "routed",
-            command: parsed.command,
-            enabled: true,
-            backend: "openclaw-pilot",
-            result_summary: {
-                status: result.status,
-                run_id: result.run_id,
-                request_path: requestPath,
-                artifact_dir: result.artifact_dir,
-                rounds: result.rounds.length,
-                created_files: result.created_files,
-            },
-            user_report: userReport(result.status, evidencePointers, result.findings.filter((finding) => finding.status === "open").map((finding) => `${finding.id}: ${finding.description}`), result.status === "completed"
-                ? "Run /verify with the updated evidence packet when a final verdict is needed."
-                : "Provide a tighter anchor, safer capability boundary, or more rounds before retrying /conv.", undefined, progressLinesForConv(result)),
-        };
+        return commandModePlanRoute("conv", target.request, target.anchor);
     }
     if (!parsed.rest)
         return usageRoute(parsed.command);
@@ -1488,32 +1452,7 @@ export async function runRoute(options) {
         approvalReference = resolution.entry.run_id;
     }
     else if (!looksLikeGoalRequestPath(parsed.rest)) {
-        const result = await runPlan({ request: parsed.rest });
-        const shortId = shortRunId(result.run_id);
-        const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
-        return {
-            schema_version: "pilot.route.v0",
-            status: result.status === "completed_plan" ? "routed" : "needs_user_decision",
-            command: parsed.command,
-            enabled: true,
-            backend: "openclaw-pilot",
-            result_summary: {
-                status: result.status,
-                mode: "goal_intake_plan",
-                run_id: result.run_id,
-                short_run_id: shortId,
-                state_root: result.goal.state_root,
-                artifact_dir: result.artifact_dir,
-                created_files: result.created_files,
-                plan_preview: planPreview(result.plan),
-                profile_expectations: profileExpectationSummary(result.goal.profile),
-            },
-            user_report: userReport(result.status === "completed_plan" ? "goal_plan_created" : "goal_needs_clarification", result.created_files, result.status === "needs_user_decision"
-                ? result.plan.ambiguity_questions || ["Goal request requires clarification before planning or execution."]
-                : ["Execution not performed. This command only created local goal-intake plan artifacts."], result.status === "needs_user_decision"
-                ? "Answer the ambiguity questions, then rerun /goal with a concrete request."
-                : `Review the plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview),
-        };
+        return commandModePlanRoute("goal", parsed.rest);
     }
     const result = await runGoal({ requestPath });
     return {

@@ -14,11 +14,13 @@ export async function runPlan(options) {
         throw new Error("pilot plan requires a request");
     }
     const stateRoot = options.stateRoot || defaultStateRoot();
+    const mode = options.mode || "plan";
+    const anchor = options.anchor;
     const now = options.now || new Date();
     const runId = createRunId(request, now);
     const artifactDir = await prepareRunDirectory(stateRoot, runId);
     const createdAt = now.toISOString();
-    const { status, ambiguityQuestions, plan } = buildPlan(request);
+    const { status, ambiguityQuestions, plan } = buildPlan({ request, mode, anchor });
     if (!isPhase1TerminalStatus(status)) {
         throw new Error(`Phase 1 cannot finish with status: ${status}`);
     }
@@ -41,7 +43,7 @@ export async function runPlan(options) {
     if (goalValidationErrors.length > 0) {
         throw new Error(`generated goal failed validation: ${goalValidationErrors.join("; ")}`);
     }
-    const executionPlan = status === "completed_plan" ? buildExecutionPlan(request, runId, plan.phase_plan) : undefined;
+    const executionPlan = status === "completed_plan" ? buildExecutionPlan(request, runId, plan.phase_plan, mode, anchor) : undefined;
     if (status === "completed_plan" && !executionPlan) {
         throw new Error("completed plan did not produce an execution plan");
     }
@@ -55,14 +57,19 @@ export async function runPlan(options) {
             run_id: runId,
             event: "intake",
             status: "ok",
-            details: { profile: DEFAULT_PROFILE },
+            details: { profile: DEFAULT_PROFILE, plan_mode: mode, ...(anchor ? { anchor } : {}) },
         },
         {
             timestamp: createdAt,
             run_id: runId,
             event: "plan_created",
             status,
-            details: { execution: "not_performed", execution_plan: executionPlan ? executionPlanArtifactName : "not_created" },
+            details: {
+                execution: "not_performed",
+                execution_plan: executionPlan ? executionPlanArtifactName : "not_created",
+                plan_mode: mode,
+                ...(anchor ? { anchor } : {}),
+            },
         },
         {
             timestamp: createdAt,
@@ -90,7 +97,7 @@ export async function runPlan(options) {
         schema_version: "pilot.lineage.v0",
         created_at: createdAt,
         record_type: "run",
-        command: "/plan",
+        command: `/${mode}`,
         run_id: runId,
         short_run_id: shortRunId(runId),
         status,
@@ -103,6 +110,8 @@ export async function runPlan(options) {
         metadata: {
             profile: DEFAULT_PROFILE,
             execution: "not_performed",
+            plan_mode: mode,
+            ...(anchor ? { anchor_reference: anchor.reference, anchor_kind: anchor.kind } : {}),
         },
     });
     return {

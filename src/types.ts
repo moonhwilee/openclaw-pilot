@@ -1,5 +1,7 @@
 export type RunStatus = "completed_plan" | "needs_user_decision";
 
+export type PlanMode = "plan" | "goal" | "verify" | "conv";
+
 export type ProfileName = "document_strategy" | "research";
 
 export type VerificationVerdict =
