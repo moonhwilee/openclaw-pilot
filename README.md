@@ -55,6 +55,7 @@ Current scope:
 - Approved goal execution writes `post-execution-evidence.json` and automatically runs deterministic `/verify` against produced artifacts and typed receipts.
 - If automatic post-execution verification returns fixable findings, approved goal execution can write `post-execution-conv-request.json`, run bounded local `/conv`, write `post-convergence-evidence.json`, and re-run deterministic `/verify`.
 - Approved goal results include a lifecycle summary with user-visible statuses such as `completed_verified`, `completed_after_convergence`, `completed_with_risks`, `needs_user_decision`, and `blocked`, plus phase markers for execution, verification, convergence, re-verification, and reporting.
+- Route, live, and Telegram-safe replies include a compact Progress section when useful. The snapshot surfaces goal milestone/phase, lifecycle phase, convergence rounds, semantic reviewer counts, P0-P3 finding counts, and the next action without requiring users to open raw artifacts first.
 - Package API exports `runGatewayBridge()` from `openclaw-pilot/gateway` for a disabled-by-default OpenClaw Gateway bridge.
 - Plan artifacts: `goal.json`, `plan.md`, `execution-plan.json`, `events.jsonl`, and `final.md`. The human-readable plan is not the execution authority; approved execution uses the typed execution plan contract.
 - Verification artifacts: `verification.json`, `events.jsonl`, and `final.md`.

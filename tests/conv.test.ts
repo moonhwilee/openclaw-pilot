@@ -106,7 +106,10 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(checkpoint.schema_version, "pilot.conv_checkpoint.v0");
   assert.equal(checkpoint.status, "completed");
   assert.equal(checkpoint.rounds.length, 1);
-  assert.match(await readFile(join(result.artifact_dir, "final.md"), "utf8"), /prior issue: Reduced existing finding finding-one/);
+  const finalMarkdown = await readFile(join(result.artifact_dir, "final.md"), "utf8");
+  assert.match(finalMarkdown, /Progress Snapshot/);
+  assert.match(finalMarkdown, /Conv: round 1/);
+  assert.match(finalMarkdown, /prior issue: Reduced existing finding finding-one/);
 });
 
 test("pilot conv blocks missing anchor paths", async () => {

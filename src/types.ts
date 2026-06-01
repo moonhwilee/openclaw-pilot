@@ -445,6 +445,7 @@ export type RouteCommand =
 
 export type RouteUserReport = {
   status: string;
+  progress?: string[];
   approval_preview?: string[];
   evidence_pointers: string[];
   remaining_risks: string[];

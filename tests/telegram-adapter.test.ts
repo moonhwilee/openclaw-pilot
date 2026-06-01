@@ -86,7 +86,12 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.equal(approval.route?.result_summary?.status, "completed");
     assert.match(approval.telegram_text, /Status: completed_verified/);
     assert.match(approval.telegram_text, /Phase: report/);
+    assert.match(approval.telegram_text, /Progress/);
+    assert.match(approval.telegram_text, /Lifecycle: report \(completed_verified\)/);
+    assert.match(approval.telegram_text, /Verify: post-execution sufficient_evidence/);
     assert.match(approval.telegram_text, /receipts\.jsonl/);
+    const approvedGoalRunId = approval.route?.result_summary?.run_id;
+    if (typeof approvedGoalRunId !== "string") throw new Error("missing approved goal run id");
 
     const status = await runTelegramAdapter({
       message: {
@@ -109,6 +114,28 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.equal(status.route?.command, "status");
     assert.match(status.telegram_text, /Status: approved/);
     assert.match(status.telegram_text, /Command: status/);
+
+    const goalStatus = await runTelegramAdapter({
+      message: {
+        text: `status ${approvedGoalRunId}`,
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23023",
+        update_id: "99004",
+        timestamp: "2026-06-01T03:58:00+09:00",
+        chat_type: "direct",
+      },
+      enabledCommands: ["/plan"],
+      authorization: {
+        allowedChatIds: ["343580315"],
+      },
+    });
+
+    assert.equal(goalStatus.authorized, true);
+    assert.equal(goalStatus.command_result?.status, "routed");
+    assert.match(goalStatus.telegram_text, /Status: completed_verified/);
+    assert.match(goalStatus.telegram_text, /Progress/);
+    assert.match(goalStatus.telegram_text, /Lifecycle: report \(completed_verified\)/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;

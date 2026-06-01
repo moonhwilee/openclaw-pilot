@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { progressLinesForConv, progressLinesForGoal, progressLinesForVerification } from "./progress.js";
 export function slugifyRequest(request) {
     const slug = request
         .toLowerCase()
@@ -134,6 +135,10 @@ export function renderVerificationMarkdown(result) {
         `Claim: ${result.packet.claim.statement}`,
         `Specialized Reviewers: ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required}`,
         "",
+        "Progress Snapshot:",
+        "",
+        ...progressLinesForVerification(result).map((line) => `- ${line}`),
+        "",
         "Findings:",
         "",
         ...result.findings.map((finding) => `- ${finding.severity}: ${finding.code} - ${finding.message}`),
@@ -150,6 +155,10 @@ export function renderConvMarkdown(result) {
         `Status: ${result.status}`,
         `Run ID: ${result.run_id}`,
         `Anchor: ${result.anchor.id}`,
+        "",
+        "Progress Snapshot:",
+        "",
+        ...progressLinesForConv(result).map((line) => `- ${line}`),
         "",
         "Findings:",
         "",
@@ -195,6 +204,10 @@ export function renderGoalRunMarkdown(result) {
             : []),
         `Run ID: ${result.run_id}`,
         `Goal: ${result.request.goal.statement}`,
+        "",
+        "Progress Snapshot:",
+        "",
+        ...progressLinesForGoal(result).map((line) => `- ${line}`),
         "",
         ...(lifecycle
             ? [

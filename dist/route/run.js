@@ -7,6 +7,7 @@ import { executionPlanArtifactName, executionPlanCapabilities, executionPlanRisk
 import { buildPostConvergenceEvidencePacket, buildPostExecutionConvRequest, buildPostExecutionEvidencePacket, fixableVerificationVerdict, } from "../goal/post-execution.js";
 import { runGoal } from "../goal/run.js";
 import { runPlan } from "../plan/run.js";
+import { progressLinesForConv, progressLinesForGoal, progressLinesForRecovery, progressLinesForVerification, } from "../progress.js";
 import { profileExpectationSummary } from "../profiles/index.js";
 import { resolveApprovalEntry } from "../state/approval-index.js";
 import { cancelRecoveryRun, createResumeDirective, isRecoveryRunCancelled, listRecoveryRuns, resolveRecoveryRun, } from "../state/recovery.js";
@@ -14,11 +15,12 @@ import { shortRunId } from "../state/run-index.js";
 import { defaultStateRoot } from "../config.js";
 import { runVerify } from "../verify/run.js";
 const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "list", "status", "resume", "cancel"]);
-function userReport(status, evidencePointers, remainingRisks, nextAction, approvalPreview) {
+function userReport(status, evidencePointers, remainingRisks, nextAction, approvalPreview, progress) {
     const uniqueEvidencePointers = [...new Set(evidencePointers)];
     const uniqueRemainingRisks = [...new Set(remainingRisks)];
     return {
         status,
+        ...(progress?.length ? { progress: [...new Set(progress)] } : {}),
         ...(approvalPreview?.length ? { approval_preview: [...new Set(approvalPreview)] } : {}),
         evidence_pointers: uniqueEvidencePointers,
         remaining_risks: uniqueRemainingRisks.length > 0 ? uniqueRemainingRisks : ["none"],
@@ -291,6 +293,15 @@ async function readConvCheckpointIfExists(artifactDir) {
             return undefined;
         throw error;
     }
+}
+async function recoveryProgressLines(run) {
+    const [goalRun, convCheckpoint, convResult, verification] = await Promise.all([
+        readGoalRunIfExists(run.artifact_dir),
+        readConvCheckpointIfExists(run.artifact_dir),
+        readConvResultIfExists(run.artifact_dir),
+        readVerificationResultIfExists(run.artifact_dir),
+    ]);
+    return progressLinesForRecovery(run, { goalRun, convCheckpoint, convResult, verification });
 }
 async function writeResumeLock(run, checkpoint) {
     const lockPath = join(run.artifact_dir, "resume-lock.json");
@@ -885,6 +896,7 @@ export async function runRoute(options) {
             };
         }
         const run = resolution.run;
+        const progress = await recoveryProgressLines(run);
         return {
             schema_version: "pilot.route.v0",
             status: run.status === "blocked" ? "blocked" : "routed",
@@ -895,7 +907,7 @@ export async function runRoute(options) {
                 status: "recovery_status",
                 run,
             },
-            user_report: userReport(run.lifecycle?.user_status || run.status, [...run.available_artifacts, ...run.evidence_pointers, ...run.receipt_pointers], recoveryStatusRisks(run), run.lifecycle?.next_action || run.resume_hint),
+            user_report: userReport(run.lifecycle?.user_status || run.status, [...run.available_artifacts, ...run.evidence_pointers, ...run.receipt_pointers], recoveryStatusRisks(run), run.lifecycle?.next_action || run.resume_hint, undefined, progress),
         };
     }
     if (parsed.command === "resume") {
@@ -1090,7 +1102,7 @@ export async function runRoute(options) {
                     lifecycle: goalResult.lifecycle,
                     profile_expectations: profileExpectationSummary(goalResult.request.goal.profile),
                 },
-                user_report: userReport(goalVisibleStatus(goalResult), [...result.evidence_pointers, ...goalResult.created_files], findingRisks(goalResult.findings), goalNextAction(goalResult)),
+                user_report: userReport(goalVisibleStatus(goalResult), [...result.evidence_pointers, ...goalResult.created_files], findingRisks(goalResult.findings), goalNextAction(goalResult), undefined, progressLinesForGoal(goalResult)),
             };
         }
         return {
@@ -1167,7 +1179,7 @@ export async function runRoute(options) {
             },
             user_report: userReport(result.semantic_verdict !== "not_requested" ? `semantic_${result.semantic_verdict}` : result.verdict, result.created_files, findingRisks(result.findings), result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
                 ? "Use the verification artifact as the evidence pointer for the next step."
-                : "Revise the evidence packet or run /conv against the listed findings."),
+                : "Revise the evidence packet or run /conv against the listed findings.", undefined, progressLinesForVerification(result)),
         };
     }
     if (parsed.command === "/conv") {
@@ -1189,7 +1201,7 @@ export async function runRoute(options) {
             },
             user_report: userReport(result.status, result.created_files, result.findings.filter((finding) => finding.status === "open").map((finding) => `${finding.id}: ${finding.description}`), result.status === "completed"
                 ? "Run /verify with the updated evidence packet when a final verdict is needed."
-                : "Provide a tighter anchor, safer capability boundary, or more rounds before retrying /conv."),
+                : "Provide a tighter anchor, safer capability boundary, or more rounds before retrying /conv.", undefined, progressLinesForConv(result)),
         };
     }
     if (!parsed.rest)
@@ -1282,6 +1294,6 @@ export async function runRoute(options) {
             lifecycle: result.lifecycle,
             profile_expectations: profileExpectationSummary(result.request.goal.profile),
         },
-        user_report: userReport(goalVisibleStatus(result), result.created_files, findingRisks(result.findings), goalNextAction(result)),
+        user_report: userReport(goalVisibleStatus(result), result.created_files, findingRisks(result.findings), goalNextAction(result), undefined, progressLinesForGoal(result)),
     };
 }
