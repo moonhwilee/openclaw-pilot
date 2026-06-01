@@ -10,6 +10,7 @@ export type VerificationVerdict =
   | "blocked";
 
 export type RiskClass = "low" | "medium" | "high";
+export type IssuePriority = "P0" | "P1" | "P2" | "P3";
 
 export type ConvStatus =
   | "completed"
@@ -205,6 +206,7 @@ export type VerificationFinding = {
   code: string;
   message: string;
   severity: "info" | "warning" | "error";
+  priority?: IssuePriority;
 };
 
 export type VerificationResult = {
@@ -231,6 +233,7 @@ export type ConvFinding = {
   id: string;
   description: string;
   status: ConvFindingStatus;
+  priority?: IssuePriority;
 };
 
 export type ConvPreflight = {

@@ -174,7 +174,9 @@ export function renderConvMarkdown(result: ConvResult): string {
     "",
     "Findings:",
     "",
-    ...result.findings.map((finding) => `- ${finding.status}: ${finding.id} - ${finding.description}`),
+    ...result.findings.map(
+      (finding) => `- ${finding.status}: ${finding.priority || "P2"} ${finding.id} - ${finding.description}`,
+    ),
     "",
     "Rounds:",
     "",

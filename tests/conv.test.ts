@@ -151,6 +151,44 @@ test("pilot conv stops at max rounds when findings remain", async () => {
   assert.ok(result.findings.some((finding) => finding.status === "open"));
 });
 
+test("pilot conv can pass when only P3 findings remain", async () => {
+  const root = await tempRoot("pilot-conv-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseConvRequest();
+  request.findings[0].priority = "P3";
+  const requestPath = join(root, "conv.json");
+  await writeJson(requestPath, request);
+
+  const result = await runConv({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.rounds.length, 0);
+  assert.equal(result.findings[0].status, "open");
+  assert.equal(result.findings[0].priority, "P3");
+});
+
+test("pilot conv rejects invalid finding priorities", async () => {
+  const root = await tempRoot("pilot-conv-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseConvRequest();
+  request.findings[0].priority = "P4" as "P3";
+  const requestPath = join(root, "conv.json");
+  await writeJson(requestPath, request);
+
+  const result = await runConv({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "needs_user_decision");
+  assert.equal(result.rounds.length, 0);
+});
+
 test("pilot conv asks for approval on ambiguous higher-risk requests", async () => {
   const root = await tempRoot("pilot-conv-");
   const stateRoot = await tempRoot("pilot-state-");

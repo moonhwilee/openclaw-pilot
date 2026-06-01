@@ -16,6 +16,7 @@ const broadActionGrants = [
 ];
 
 const lifecyclePhaseNames = new Set(["plan", "approve", "execute", "verify", "converge", "reverify", "report"]);
+const issuePriorities = new Set(["P0", "P1", "P2", "P3"]);
 
 function isIsoTimestamp(value: string): boolean {
   return !Number.isNaN(Date.parse(value));
@@ -212,6 +213,9 @@ export function validateConvRequest(request: ConvRequest): string[] {
     if (!finding.description?.trim()) errors.push(`missing finding description: ${finding.id || "unknown"}`);
     if (finding.status !== "open" && finding.status !== "reduced") {
       errors.push(`invalid finding status: ${finding.id || "unknown"}`);
+    }
+    if (finding.priority !== undefined && !issuePriorities.has(finding.priority)) {
+      errors.push(`invalid finding priority: ${finding.id || "unknown"}`);
     }
   }
 

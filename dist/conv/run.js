@@ -8,11 +8,14 @@ import { shortRunId } from "../state/run-index.js";
 function needsApproval(request) {
     return request.preflight.risk_class !== "low";
 }
-function hasOpenFindings(findings) {
-    return findings.some((finding) => finding.status === "open");
+function findingPriority(finding) {
+    return finding.priority || "P2";
 }
-function nextOpenFinding(findings) {
-    return findings.find((finding) => finding.status === "open");
+function hasBlockingOpenFindings(findings) {
+    return findings.some((finding) => finding.status === "open" && findingPriority(finding) !== "P3");
+}
+function nextOpenBlockingFinding(findings) {
+    return findings.find((finding) => finding.status === "open" && findingPriority(finding) !== "P3");
 }
 function openFindingRisks(findings) {
     return findings
@@ -141,8 +144,8 @@ async function continueConvRun(options) {
         });
     }
     else {
-        for (let round = nextRoundNumber(options.rounds); round <= options.request.preflight.max_rounds && hasOpenFindings(options.findings); round += 1) {
-            const finding = nextOpenFinding(options.findings);
+        for (let round = nextRoundNumber(options.rounds); round <= options.request.preflight.max_rounds && hasBlockingOpenFindings(options.findings); round += 1) {
+            const finding = nextOpenBlockingFinding(options.findings);
             if (!finding)
                 break;
             const evidenceUpdate = join(options.artifactDir, `round-${round}-evidence-update.md`);
@@ -192,7 +195,7 @@ async function continueConvRun(options) {
                 artifact_dir: options.artifactDir,
             }, new Date(options.createdAt));
         }
-        status = hasOpenFindings(options.findings) ? "max_rounds_reached" : "completed";
+        status = hasBlockingOpenFindings(options.findings) ? "max_rounds_reached" : "completed";
         options.events.push({
             timestamp: options.createdAt,
             run_id: options.runId,

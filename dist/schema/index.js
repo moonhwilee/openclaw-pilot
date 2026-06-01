@@ -13,6 +13,7 @@ const broadActionGrants = [
     "알아서 해",
 ];
 const lifecyclePhaseNames = new Set(["plan", "approve", "execute", "verify", "converge", "reverify", "report"]);
+const issuePriorities = new Set(["P0", "P1", "P2", "P3"]);
 function isIsoTimestamp(value) {
     return !Number.isNaN(Date.parse(value));
 }
@@ -231,6 +232,9 @@ export function validateConvRequest(request) {
             errors.push(`missing finding description: ${finding.id || "unknown"}`);
         if (finding.status !== "open" && finding.status !== "reduced") {
             errors.push(`invalid finding status: ${finding.id || "unknown"}`);
+        }
+        if (finding.priority !== undefined && !issuePriorities.has(finding.priority)) {
+            errors.push(`invalid finding priority: ${finding.id || "unknown"}`);
         }
     }
     const preflight = request.preflight;
