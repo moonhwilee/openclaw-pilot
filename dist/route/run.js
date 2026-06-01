@@ -119,7 +119,7 @@ function looksLikeRunReference(value) {
     return /^\d{6}$/.test(value) || /^\d{8}T\d{6}Z-[a-z0-9가-힣-]+$/.test(value);
 }
 function looksLikeGoalRequestPath(value) {
-    return /\.json$/i.test(value) || value.includes("/") || value.includes("\\");
+    return /^[^\s]+\.json$/i.test(value.trim());
 }
 function parseRunReferenceAndReason(input) {
     const [reference = "", ...reasonParts] = input.trim().split(/\s+/);
