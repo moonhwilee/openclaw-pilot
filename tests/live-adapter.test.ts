@@ -60,7 +60,7 @@ test("live adapter shows usage for empty Pilot slash commands", () => {
   }
 });
 
-test("live adapter preserves goal approval wait in Telegram text", () => {
+test("live adapter blocks goal request JSON shortcuts in Telegram text", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "live", "--enabled=/goal", "/goal fixtures/document_strategy/goal-request-draft.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
@@ -68,7 +68,7 @@ test("live adapter preserves goal approval wait in Telegram text", () => {
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.route.status, "awaiting_approval");
-  assert.match(output.telegram_text, /Status: awaiting_approval/);
-  assert.match(output.telegram_text, /scoped approval/);
+  assert.equal(output.route.status, "needs_user_decision");
+  assert.match(output.telegram_text, /Status: artifact_shortcut_disabled/);
+  assert.match(output.telegram_text, /pilot artifact goal-request/);
 });

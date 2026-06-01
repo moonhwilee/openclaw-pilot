@@ -2,23 +2,23 @@
 
 OpenClaw Pilot is a local planning, verification, convergence, and scoped-goal CLI.
 
-Current workspace roadmap and TODO are tracked in
-`/Users/moon/.openclaw/workspace/docs/openclaw-pilot/current-roadmap.md`.
+Current roadmap and TODO are tracked in
+`docs/openclaw-pilot/current-roadmap.md`.
 
 The next PilotLead UX and quality-loop implementation contract is documented
 in `docs/pilotlead-v0.2.8-product-contract.md`.
 
-The next natural-command UX contract is documented in
-`docs/natural-command-contract-v0.2.10.md`: user-facing examples should be
-natural-language-first, while JSON path forms remain advanced artifact
-shortcuts.
+The current natural-command UX contract is documented in
+`docs/natural-command-contract-v0.2.11.md`: user-facing commands are
+natural-language-first, while JSON artifact execution is maintainer-only through
+`pilot artifact`.
 
 ## Install
 
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.10
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.11
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -46,12 +46,15 @@ Current scope:
 - `pilot doctor` reports package/config/state health in a user-friendly way.
 - `pilot smoke` runs a quick maintainer/CI health check over the shipped fixtures, including the typed `execution-plan.json` contract/hash check.
 - `pilot plan <request>` creates local plan artifacts only.
-- `pilot verify <natural target>` verifies a claim, recent run, or run reference by building any needed internal evidence packet. JSON evidence packets remain advanced artifact shortcuts.
-- `pilot conv <natural target>` converges clear findings from a recent run, run reference, or supplied anchor. JSON conv requests remain advanced artifact shortcuts.
-- `pilot goal <natural objective>` creates a goal-intake plan and waits for approval before execution. Approved goal request JSON remains an advanced artifact shortcut.
+- `pilot verify <natural target>` treats verification as content review by default and refuses to present mechanical artifact checks as implementation approval.
+- `pilot conv <natural target>` converges clear findings from a recent run, run reference, or supplied anchor, and asks for a clearer anchor or plan when prose is broad.
+- `pilot goal <natural objective>` creates a goal-intake plan and waits for approval before execution.
+- `pilot artifact verify <evidence-packet.json>` runs maintainer-only mechanical evidence packet verification.
+- `pilot artifact conv <conv-request.json>` runs maintainer-only bounded convergence from a typed conv request.
+- `pilot artifact goal-request <goal-request.json>` runs maintainer-only typed goal request fixtures.
 - `pilot list [limit]` lists recent Pilot runs from shared lineage without changing state.
 - `pilot status <Run>` inspects one run's lifecycle, lineage, evidence, receipts, recovery freshness, and available artifacts without changing state.
-- `pilot resume <Run>` writes `resume.json`, computes the latest safe phase checkpoint, and can automatically resume approved runner-backed work from `execute`, missing post-execution `verify`, fixable `converge`, missing post-convergence `reverify`, or standalone `/conv` from `conv-checkpoint.json` with a `resume-lock.json` idempotency guard.
+- `pilot resume <Run>` writes `resume.json`, computes the latest safe phase checkpoint, and can automatically resume approved runner-backed work from `execute`, missing post-execution `verify`, fixable `converge`, missing post-convergence `reverify`, or standalone `/conv` from `conv-checkpoint.json` with a `resume-lock.json` idempotency guard. `resume recent/latest` is not executed silently because resume can create artifacts and run checkpoints.
 - `pilot cancel <Run> [reason]` records a cancellation marker and blocks later approval/execution for that run.
 - `pilot route --enabled|--disabled "<exact command>"` tests exact command routing without invoking any legacy backend.
 - `pilot live --enabled=/plan,/verify "<exact command>"` applies per-command live enablement and renders Telegram-safe text.
@@ -94,13 +97,13 @@ npm run pilot -- route --enabled "/verify 최근 goal 결과 검증해줘"
 npm run pilot -- live --enabled=/plan "/plan Draft a document strategy plan"
 ```
 
-Advanced artifact shortcuts for maintainers and fixtures:
+Maintainer artifact commands for fixtures and typed internal artifacts:
 
 ```bash
-npm run pilot -- verify fixtures/document_strategy/evidence-packet.json
-npm run pilot -- conv fixtures/document_strategy/conv-request.json
-npm run pilot -- goal fixtures/document_strategy/goal-request-draft.json
-npm run pilot -- goal fixtures/document_strategy/goal-request-approved.json
+npm run pilot -- artifact verify fixtures/document_strategy/evidence-packet.json
+npm run pilot -- artifact conv fixtures/document_strategy/conv-request.json
+npm run pilot -- artifact goal-request fixtures/document_strategy/goal-request-draft.json
+npm run pilot -- artifact goal-request fixtures/document_strategy/goal-request-approved.json
 ```
 
 Override state root:
@@ -126,7 +129,7 @@ PILOT_RECOVERY_STALE_AFTER_MS=1800000 npm run pilot -- status <Run>
 
 `PILOT_RECOVERY_STALE_AFTER_MS` controls when a non-terminal, non-cancelled run is shown as stale in `list`, `status`, and `resume` output. The default is 30 minutes. Stale status does not mean "rerun from the beginning"; `resume <Run>` uses the latest safe checkpoint. The current v1 slice can auto-resume approved runner-backed work from `execute`, restart a missing post-execution `verify`, run bounded `converge` for fixable verification findings, restart a missing post-convergence `reverify`, and continue standalone `/conv` from `conv-checkpoint.json`.
 
-Standalone natural `/verify` writes an internal evidence packet before running verification. Direct evidence packet paths remain rerunnable as advanced artifact shortcuts. The future checkpoint contract is opened as `pilot.verify_checkpoint.v0`: long verification can record processed criteria, processed evidence, written findings, and the next verification action before adding criteria-level resume execution.
+Standalone user-facing `/verify` means content review. If the route does not have enough evidence scope to review the actual implementation or outcome, it returns `verify_needs_evidence` instead of silently creating a deterministic-only packet. Mechanical evidence packet verification remains available through `pilot artifact verify`. The future checkpoint contract is opened as `pilot.verify_checkpoint.v0`: long verification can record processed criteria, processed evidence, written findings, and the next verification action before adding criteria-level resume execution.
 
 Enable a session runner explicitly:
 
@@ -134,5 +137,5 @@ Enable a session runner explicitly:
 PILOT_SESSION_RUNNER_ENABLED=true \
 PILOT_SESSION_RUNNER_COMMAND=codex \
 PILOT_SESSION_RUNNER_ARGS_JSON='["exec","--ask-for-approval","never","--sandbox","workspace-write","-"]' \
-npm run pilot -- goal path/to/approved-runner-goal.json
+npm run pilot -- artifact goal-request path/to/approved-runner-goal.json
 ```
