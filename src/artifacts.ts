@@ -189,6 +189,7 @@ export function renderGoalRunMarkdown(result: GoalRunResult): string {
     ? "Execution boundary: approved Codex/session runner only. Stop required for actions outside the approved plan."
     : "Execution boundary: scoped local goal artifacts only. No Telegram routing, external action, agent spawn, or dangerous action.";
   const lifecycle = result.lifecycle;
+  const milestones = result.request.execution_plan?.goal_milestones || [];
 
   return [
     "# Pilot Goal Result",
@@ -209,6 +210,17 @@ export function renderGoalRunMarkdown(result: GoalRunResult): string {
           "Lifecycle:",
           "",
           ...lifecycle.steps.map((step) => `- ${step.phase}: ${step.status} - ${step.detail}`),
+          "",
+        ]
+      : []),
+    ...(milestones.length
+      ? [
+          "Goal Milestones:",
+          "",
+          ...milestones.map(
+            (milestone) =>
+              `- ${milestone.phase_index}. ${milestone.goal_phase}: ${milestone.status} (${milestone.slice_ids.length} slices)`,
+          ),
           "",
         ]
       : []),

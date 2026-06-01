@@ -124,7 +124,7 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
   try {
     const result = await runTelegramAdapter({
       message: {
-        text: "/goal Build a tiny local dashboard prototype for reviewing Pilot receipts.",
+        text: "/goal Implement a tiny local dashboard prototype for reviewing Pilot receipts.",
         chat_id: "343580315",
         sender_id: "343580315",
         message_id: "23151",
@@ -147,6 +147,7 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     assert.match(result.telegram_text, /Phase\/slice plan:/);
     assert.match(result.telegram_text, /Approval/);
     assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
+    assert.match(result.telegram_text, /Goal milestones: \d+ phases, \d+ slices/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /approve \d{6}/);
 
