@@ -923,6 +923,106 @@ test("approve route connects an implementation goal to the approved session runn
   }
 });
 
+test("approve route executes freeform local file creation goals through the session runner", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousEnv = {
+    enabled: process.env.PILOT_SESSION_RUNNER_ENABLED,
+    command: process.env.PILOT_SESSION_RUNNER_COMMAND,
+    args: process.env.PILOT_SESSION_RUNNER_ARGS_JSON,
+    timeout: process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS,
+    target: process.env.PILOT_TEST_TARGET_PATH,
+  };
+  const stateRoot = await tempStateRoot();
+  const targetPath = join(stateRoot, "workspace", "tmp", "pilot-e2e-smoke.txt");
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  process.env.PILOT_SESSION_RUNNER_ENABLED = "true";
+  process.env.PILOT_SESSION_RUNNER_COMMAND = process.execPath;
+  process.env.PILOT_SESSION_RUNNER_ARGS_JSON = JSON.stringify([
+    "-e",
+    [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "const target = process.env.PILOT_TEST_TARGET_PATH;",
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { input += chunk; });",
+      "process.stdin.on('end', () => {",
+      "  if (!target) process.exit(2);",
+      "  if (!input.includes('do not replace it with a placeholder Pilot artifact')) process.exit(3);",
+      "  fs.mkdirSync(path.dirname(target), { recursive: true });",
+      "  fs.writeFileSync(target, 'pilot e2e smoke ok\\n', 'utf8');",
+      "  console.log(`created ${target}`);",
+      "});",
+    ].join(" "),
+  ]);
+  process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = "5000";
+  process.env.PILOT_TEST_TARGET_PATH = targetPath;
+  try {
+    const prompt = `Create a tiny Pilot end-to-end smoke artifact in ${targetPath} with one line: "pilot e2e smoke ok". Verify the file exists and report the evidence path.`;
+    const plan = await runRoute({
+      input: `/goal ${prompt}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23360" },
+    });
+    assert.equal(plan.status, "routed");
+    assert.equal(plan.user_report.status, "goal_plan_created");
+    const shortId = plan.result_summary?.short_run_id as string;
+    const planRunId = plan.result_summary?.run_id as string;
+    const artifactDir = plan.result_summary?.artifact_dir as string;
+    assert.ok(shortId);
+    assert.ok(planRunId);
+    assert.ok(artifactDir);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23360",
+      source_update_id: "23360",
+      command: "/goal",
+      run_id: planRunId,
+      short_run_id: shortId,
+      status: "goal_plan_created",
+      artifact_dir: artifactDir,
+      next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+    });
+
+    const output = await runRoute({
+      input: `approve ${shortId}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23361" },
+    });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "completed_verified");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-result.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-stdout.txt")));
+    assert.equal(await readFile(targetPath, "utf8"), "pilot e2e smoke ok\n");
+    const approvedRequest = JSON.parse(await readFile(join(artifactDir, "approved-goal-request.json"), "utf8"));
+    assert.match(approvedRequest.goal.statement, /Execute approved Codex\/session work/);
+    assert.ok(approvedRequest.goal.statement.includes(prompt));
+    assert.deepEqual(approvedRequest.approval.approved_capabilities, ["run_codex_session"]);
+    assert.equal(approvedRequest.preflight.risk_class, "high");
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousEnv.enabled === undefined) delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+    else process.env.PILOT_SESSION_RUNNER_ENABLED = previousEnv.enabled;
+    if (previousEnv.command === undefined) delete process.env.PILOT_SESSION_RUNNER_COMMAND;
+    else process.env.PILOT_SESSION_RUNNER_COMMAND = previousEnv.command;
+    if (previousEnv.args === undefined) delete process.env.PILOT_SESSION_RUNNER_ARGS_JSON;
+    else process.env.PILOT_SESSION_RUNNER_ARGS_JSON = previousEnv.args;
+    if (previousEnv.timeout === undefined) delete process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS;
+    else process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = previousEnv.timeout;
+    if (previousEnv.target === undefined) delete process.env.PILOT_TEST_TARGET_PATH;
+    else process.env.PILOT_TEST_TARGET_PATH = previousEnv.target;
+  }
+});
+
 test("/conv exact route smoke runs anchored conv fixture", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "route", "--enabled", "/conv fixtures/document_strategy/conv-request.json"], {
     cwd: new URL("..", import.meta.url),
