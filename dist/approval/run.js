@@ -82,6 +82,17 @@ function isRunnerBackedGoalRequest(request) {
     ].some((token) => normalized.includes(token));
 }
 function approvedExecutionBoundary(entry, goal) {
+    if (isPilotReceiptsDashboardRequest(goal.request)) {
+        return {
+            approved_scope: [
+                `Approved local dashboard prototype execution for Pilot plan run ${entry.short_run_id}.`,
+                "Create a self-contained local Pilot receipts dashboard inside the new goal run artifact directory.",
+                "Read local Pilot receipt artifacts as source data; do not mutate files outside the new goal run artifact directory.",
+            ],
+            approved_capabilities: ["create_pilot_receipts_dashboard"],
+            next_action: `Run /goal ${entry.short_run_id} to create the approved local Pilot receipts dashboard prototype.`,
+        };
+    }
     if (isRunnerBackedGoalRequest(goal.request)) {
         return {
             approved_scope: [
@@ -92,17 +103,6 @@ function approvedExecutionBoundary(entry, goal) {
             ],
             approved_capabilities: ["run_codex_session"],
             next_action: `Run /goal ${entry.short_run_id} to execute the approved Codex/session runner slice.`,
-        };
-    }
-    if (isPilotReceiptsDashboardRequest(goal.request)) {
-        return {
-            approved_scope: [
-                `Approved local dashboard prototype execution for Pilot plan run ${entry.short_run_id}.`,
-                "Create a self-contained local Pilot receipts dashboard inside the new goal run artifact directory.",
-                "Read local Pilot receipt artifacts as source data; do not mutate files outside the new goal run artifact directory.",
-            ],
-            approved_capabilities: ["create_pilot_receipts_dashboard"],
-            next_action: `Run /goal ${entry.short_run_id} to create the approved local Pilot receipts dashboard prototype.`,
         };
     }
     return {

@@ -812,7 +812,10 @@ test("approve route creates a Pilot receipts dashboard for dashboard receipt goa
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
   try {
-    const plan = await runPlan({ request: "Build a tiny local dashboard prototype for reviewing Pilot receipts." });
+    const plan = await runPlan({
+      request:
+        "Create a tiny local dashboard prototype for reviewing Pilot receipts at /tmp/pilot-receipts-dashboard.html.",
+    });
     const shortId = shortRunId(plan.run_id);
     await appendRunIndexEntry(stateRoot, {
       schema_version: "pilot.run_index.v0",
