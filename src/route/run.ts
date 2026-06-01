@@ -91,6 +91,20 @@ function executionPlanApprovalPreview(plan: ExecutionPlan | undefined, shortId: 
   ];
 }
 
+function planPreview(plan: CommonPlanContract): string[] {
+  const phaseCount = plan.phase_plan?.length || 0;
+  const sliceCount = plan.phase_plan?.reduce((count, phase) => count + phase.slices.length, 0) || 0;
+  return [
+    `Goal: ${plan.goal}`,
+    ...(plan.outcome_summary ? [`Outcome: ${plan.outcome_summary}`] : []),
+    ...(plan.context_summary?.length ? [`Context: ${plan.context_summary[0]}`] : []),
+    phaseCount > 0
+      ? `Phase/slice plan: ${phaseCount} goal phases, ${sliceCount} implementation slices.`
+      : "Phase/slice plan: not needed for this small planning loop.",
+    `Verification gates: ${plan.verification_gates.slice(0, 2).join("; ")}`,
+  ];
+}
+
 async function readPlanApprovalPreview(artifactDir: string, shortId: string, runId: string): Promise<string[]> {
   try {
     return executionPlanApprovalPreview(await readExecutionPlan(join(artifactDir, executionPlanArtifactName)), shortId, runId);
@@ -1351,6 +1365,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         state_root: result.goal.state_root,
         artifact_dir: result.artifact_dir,
         created_files: result.created_files,
+        plan_preview: planPreview(result.plan),
         profile_expectations: profileExpectationSummary(result.goal.profile),
       },
       user_report: userReport(
@@ -1495,6 +1510,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
         state_root: result.goal.state_root,
         artifact_dir: result.artifact_dir,
         created_files: result.created_files,
+        plan_preview: planPreview(result.plan),
         profile_expectations: profileExpectationSummary(result.goal.profile),
       },
       user_report: userReport(

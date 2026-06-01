@@ -70,8 +70,26 @@ export type ActionBoundaries = {
   disallowed_actions: string[];
 };
 
+export type GoalPhaseSlice = {
+  id: string;
+  objective: string;
+  check: string[];
+  convergence_gate: string;
+};
+
+export type GoalPhasePlan = {
+  goal_phase: string;
+  objective: string;
+  slices: GoalPhaseSlice[];
+  phase_verify: string;
+  pass_criteria: string[];
+};
+
 export type CommonPlanContract = {
   goal: string;
+  outcome_summary?: string;
+  context_summary?: string[];
+  phase_plan?: GoalPhasePlan[];
   scope: string[];
   out_of_scope: string[];
   success_criteria: string[];

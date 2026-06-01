@@ -12,6 +12,7 @@ const broadActionGrants = [
     "contact people if needed",
     "알아서 해",
 ];
+const lifecyclePhaseNames = new Set(["plan", "approve", "execute", "verify", "converge", "reverify", "report"]);
 function isIsoTimestamp(value) {
     return !Number.isNaN(Date.parse(value));
 }
@@ -38,6 +39,33 @@ export function validateCommonPlanContract(plan) {
     for (const action of boundaries.allowed_actions) {
         if (isBroadActionGrant(action)) {
             errors.push(`overbroad allowed action: ${action}`);
+        }
+    }
+    for (const phase of plan.phase_plan || []) {
+        if (!phase.goal_phase?.trim())
+            errors.push("missing goal phase");
+        if (lifecyclePhaseNames.has(phase.goal_phase)) {
+            errors.push(`goal phase must not reuse lifecycle phase name: ${phase.goal_phase}`);
+        }
+        if (!phase.objective?.trim())
+            errors.push(`missing goal phase objective: ${phase.goal_phase || "unknown"}`);
+        if (!Array.isArray(phase.slices) || phase.slices.length === 0) {
+            errors.push(`missing slices for goal phase: ${phase.goal_phase || "unknown"}`);
+        }
+        if (!phase.phase_verify?.trim())
+            errors.push(`missing phase verify gate: ${phase.goal_phase || "unknown"}`);
+        if (!Array.isArray(phase.pass_criteria) || phase.pass_criteria.length === 0) {
+            errors.push(`missing phase pass criteria: ${phase.goal_phase || "unknown"}`);
+        }
+        for (const slice of phase.slices || []) {
+            if (!slice.id?.trim())
+                errors.push(`missing slice id: ${phase.goal_phase || "unknown"}`);
+            if (!slice.objective?.trim())
+                errors.push(`missing slice objective: ${slice.id || "unknown"}`);
+            if (!Array.isArray(slice.check) || slice.check.length === 0)
+                errors.push(`missing slice checks: ${slice.id || "unknown"}`);
+            if (!slice.convergence_gate?.trim())
+                errors.push(`missing slice convergence gate: ${slice.id || "unknown"}`);
         }
     }
     return errors;
