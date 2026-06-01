@@ -440,6 +440,7 @@ export type RouteCommand =
   | "/conv"
   | "/goal"
   | "approve"
+  | "answer"
   | "list"
   | "status"
   | "resume"
@@ -448,10 +449,24 @@ export type RouteCommand =
 export type RouteUserReport = {
   status: string;
   progress?: string[];
+  plan_draft?: UserFacingPlanDraft;
   approval_preview?: string[];
   evidence_pointers: string[];
   remaining_risks: string[];
   next_action: string;
+};
+
+export type UserFacingPlanDraft = {
+  title: string;
+  mode: PlanMode;
+  understood_request: string;
+  assumptions: string[];
+  approach: string[];
+  steps: string[];
+  verification: string[];
+  approval_boundary: string[];
+  not_doing_yet: string[];
+  open_questions?: string[];
 };
 
 export type PilotRunIndexEntry = {

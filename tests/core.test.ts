@@ -28,7 +28,10 @@ test("core API routes enabled plan commands through Pilot", async () => {
     assert.match(result.reply_text, /Status: plan_created/);
     assert.match(result.reply_text, /Run: \d{6}/);
     assert.match(result.reply_text, /Run ID: \d{8}T\d{6}Z-draft-a-local-document-strategy-plan/);
-    assert.match(result.reply_text, /Next: Review the plan. To continue, reply "approve /);
+    assert.match(result.reply_text, /Planning Draft/);
+    assert.match(result.reply_text, /Next: Review the planning draft/);
+    assert.doesNotMatch(result.reply_text, /Approval\n/);
+    assert.doesNotMatch(result.reply_text, /Evidence\n- none/);
     assert.deepEqual(result.metadata, { message_id: "core-test" });
   } finally {
     if (previousStateRoot === undefined) {

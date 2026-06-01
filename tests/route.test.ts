@@ -156,7 +156,9 @@ test("/plan exact route smoke uses new Pilot backend", async () => {
   assert.match(output.result_summary.run_id, /^.+draft-a-local-document-strategy-plan$/);
   assert.match(output.result_summary.short_run_id, /^\d{6}$/);
   assert.equal(output.user_report.status, "plan_created");
-  assert.match(output.user_report.next_action, /approve \d{6}/);
+  assert.match(output.user_report.next_action, /Review the planning draft/);
+  assert.equal(output.user_report.approval_preview, undefined);
+  assert.equal(output.user_report.plan_draft?.mode, "plan");
 });
 
 test("recovery list and status inspect recent Pilot runs without mutating execution state", async () => {
@@ -260,7 +262,8 @@ test("/verify recent target creates a command-mode verification plan instead of 
     assert.equal(verify.result_summary?.plan_mode, "verify");
     assert.match(verify.user_report.next_action, /approve \d{6}/);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|natural-verify-evidence-packet\.json/);
-    assert.ok(verify.user_report.progress?.some((line) => line.includes("Mode: verification plan")));
+    assert.equal(verify.user_report.plan_draft?.mode, "verify");
+    assert.equal(verify.user_report.progress, undefined);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -288,7 +291,8 @@ test("broad implementation /verify creates a command-mode review plan without a 
     assert.match(verify.user_report.next_action, /approve \d{6}/);
     assert.deepEqual(verify.user_report.evidence_pointers, []);
     assert.ok((verify.result_summary?.created_files as string[]).some((pointer) => pointer.endsWith("plan.md")));
-    assert.ok(verify.user_report.progress?.some((line) => line.includes("Router: command mode plus mechanical target only")));
+    assert.equal(verify.user_report.plan_draft?.mode, "verify");
+    assert.equal(verify.user_report.progress, undefined);
     assert.equal(verify.result_summary?.version_scope, undefined);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|Findings: none|natural-verify-evidence-packet/);
   } finally {
@@ -1477,8 +1481,46 @@ test("/goal vague freeform route asks for clarification without handoff executio
     assert.equal(output.command, "/goal");
     assert.equal(output.user_report.status, "goal_needs_clarification");
     assert.equal(output.result_summary?.plan_mode, "goal");
-    assert.match(output.user_report.next_action, /Answer the ambiguity questions/);
+    assert.match(output.user_report.next_action, /answer \d{6} <clarification>/);
     assert.ok(output.user_report.remaining_risks.some((risk) => risk.includes("concrete outcome")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("exact-bound interview answer continues a clarification run without recent fallback", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  try {
+    const clarification = await runRoute({
+      input: "/goal 도와줘",
+      enabled: true,
+    });
+    const shortId = String(clarification.result_summary?.short_run_id || "");
+
+    const recent = await runRoute({
+      input: "answer recent Create one local planning smoke artifact and verify it exists.",
+      enabled: true,
+    });
+    assert.equal(recent.status, "needs_user_decision");
+    assert.equal(recent.user_report.status, "interview_answer_recent_rejected");
+
+    const continued = await runRoute({
+      input: `answer ${shortId} Create one local planning smoke artifact and verify it exists.`,
+      enabled: true,
+    });
+
+    assert.equal(continued.status, "awaiting_approval");
+    assert.equal(continued.command, "answer");
+    assert.equal(continued.user_report.status, "goal_plan_created");
+    assert.equal(continued.result_summary?.parent_interview_run_id, clarification.result_summary?.run_id);
+    assert.equal(continued.user_report.plan_draft?.mode, "goal");
+    assert.match(continued.user_report.next_action, /approve \d{6}/);
+    assert.doesNotMatch(JSON.stringify(continued.user_report), /Router: command mode plus mechanical target only/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;

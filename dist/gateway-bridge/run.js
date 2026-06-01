@@ -7,6 +7,7 @@ const exactCommands = new Set([
     "/conv",
     "/goal",
     "approve",
+    "answer",
     "list",
     "status",
     "resume",
@@ -26,10 +27,14 @@ function enabledCommandsForGate(gate = {}) {
         return [];
     const configured = gate.enabledCommands || ["/plan"];
     const enabled = configured.filter((command) => exactCommands.has(command));
-    if (enabled.includes("/plan") && !enabled.includes("approve"))
+    if ((enabled.includes("/plan") || enabled.includes("/goal") || enabled.includes("/verify") || enabled.includes("/conv")) &&
+        !enabled.includes("approve")) {
         enabled.push("approve");
-    if (enabled.includes("/goal") && !enabled.includes("approve"))
-        enabled.push("approve");
+    }
+    if ((enabled.includes("/plan") || enabled.includes("/goal") || enabled.includes("/verify") || enabled.includes("/conv")) &&
+        !enabled.includes("answer")) {
+        enabled.push("answer");
+    }
     return enabled;
 }
 function toTelegramMessage(message) {
