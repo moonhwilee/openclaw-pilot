@@ -427,7 +427,7 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
     },
     user_report: userReport(
       visibleStatus,
-      result.created_files,
+      [],
       result.status === "needs_user_decision"
         ? result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
         : planModeCompletedRisks(mode),
