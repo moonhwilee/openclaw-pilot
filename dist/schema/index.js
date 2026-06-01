@@ -12,6 +12,8 @@ const broadActionGrants = [
     "contact people if needed",
     "알아서 해",
 ];
+const lifecyclePhaseNames = new Set(["plan", "approve", "execute", "verify", "converge", "reverify", "report"]);
+const issuePriorities = new Set(["P0", "P1", "P2", "P3"]);
 function isIsoTimestamp(value) {
     return !Number.isNaN(Date.parse(value));
 }
@@ -38,6 +40,33 @@ export function validateCommonPlanContract(plan) {
     for (const action of boundaries.allowed_actions) {
         if (isBroadActionGrant(action)) {
             errors.push(`overbroad allowed action: ${action}`);
+        }
+    }
+    for (const phase of plan.phase_plan || []) {
+        if (!phase.goal_phase?.trim())
+            errors.push("missing goal phase");
+        if (lifecyclePhaseNames.has(phase.goal_phase)) {
+            errors.push(`goal phase must not reuse lifecycle phase name: ${phase.goal_phase}`);
+        }
+        if (!phase.objective?.trim())
+            errors.push(`missing goal phase objective: ${phase.goal_phase || "unknown"}`);
+        if (!Array.isArray(phase.slices) || phase.slices.length === 0) {
+            errors.push(`missing slices for goal phase: ${phase.goal_phase || "unknown"}`);
+        }
+        if (!phase.phase_verify?.trim())
+            errors.push(`missing phase verify gate: ${phase.goal_phase || "unknown"}`);
+        if (!Array.isArray(phase.pass_criteria) || phase.pass_criteria.length === 0) {
+            errors.push(`missing phase pass criteria: ${phase.goal_phase || "unknown"}`);
+        }
+        for (const slice of phase.slices || []) {
+            if (!slice.id?.trim())
+                errors.push(`missing slice id: ${phase.goal_phase || "unknown"}`);
+            if (!slice.objective?.trim())
+                errors.push(`missing slice objective: ${slice.id || "unknown"}`);
+            if (!Array.isArray(slice.check) || slice.check.length === 0)
+                errors.push(`missing slice checks: ${slice.id || "unknown"}`);
+            if (!slice.convergence_gate?.trim())
+                errors.push(`missing slice convergence gate: ${slice.id || "unknown"}`);
         }
     }
     return errors;
@@ -133,6 +162,31 @@ export function validateEvidencePacket(packet) {
     if (packet.reviewer_boundary?.deterministic_checks_only !== true) {
         errors.push("deterministic_checks_only must be true for local Phase 2 verification");
     }
+    if (packet.specialized_reviewers !== undefined && !Array.isArray(packet.specialized_reviewers)) {
+        errors.push("invalid specialized reviewers");
+    }
+    const reviewerIds = new Set();
+    for (const reviewer of packet.specialized_reviewers || []) {
+        if (!reviewer.id?.trim())
+            errors.push("missing specialized reviewer id");
+        if (reviewer.id && reviewerIds.has(reviewer.id))
+            errors.push(`duplicate specialized reviewer id: ${reviewer.id}`);
+        if (reviewer.id)
+            reviewerIds.add(reviewer.id);
+        if (!reviewer.role?.trim())
+            errors.push(`missing specialized reviewer role: ${reviewer.id || "unknown"}`);
+        if (!reviewer.specialty?.trim())
+            errors.push(`missing specialized reviewer specialty: ${reviewer.id || "unknown"}`);
+        if (!["pass", "pass_with_risks", "needs_revision", "fail", "blocked"].includes(reviewer.verdict)) {
+            errors.push(`invalid specialized reviewer verdict: ${reviewer.id || "unknown"}`);
+        }
+        if (!["low", "medium", "high"].includes(reviewer.confidence)) {
+            errors.push(`invalid specialized reviewer confidence: ${reviewer.id || "unknown"}`);
+        }
+        if (!Array.isArray(reviewer.notes) || reviewer.notes.length === 0) {
+            errors.push(`missing specialized reviewer notes: ${reviewer.id || "unknown"}`);
+        }
+    }
     return errors;
 }
 const safeConvCapabilities = new Set([
@@ -178,6 +232,9 @@ export function validateConvRequest(request) {
             errors.push(`missing finding description: ${finding.id || "unknown"}`);
         if (finding.status !== "open" && finding.status !== "reduced") {
             errors.push(`invalid finding status: ${finding.id || "unknown"}`);
+        }
+        if (finding.priority !== undefined && !issuePriorities.has(finding.priority)) {
+            errors.push(`invalid finding priority: ${finding.id || "unknown"}`);
         }
     }
     const preflight = request.preflight;
@@ -225,6 +282,37 @@ export function validateExecutionPlan(plan) {
         errors.push("missing forbidden actions");
     if (!Array.isArray(plan.requires_reapproval_if))
         errors.push("missing reapproval triggers");
+    if (plan.goal_milestones !== undefined && !Array.isArray(plan.goal_milestones)) {
+        errors.push("invalid goal milestones");
+    }
+    const milestoneIndexes = new Set();
+    for (const milestone of plan.goal_milestones || []) {
+        if (!Number.isInteger(milestone.phase_index) || milestone.phase_index < 1) {
+            errors.push(`invalid goal milestone phase index: ${milestone.goal_phase || "unknown"}`);
+        }
+        if (milestoneIndexes.has(milestone.phase_index)) {
+            errors.push(`duplicate goal milestone phase index: ${milestone.phase_index}`);
+        }
+        milestoneIndexes.add(milestone.phase_index);
+        if (!milestone.goal_phase?.trim())
+            errors.push("missing goal milestone phase");
+        if (lifecyclePhaseNames.has(milestone.goal_phase)) {
+            errors.push(`goal milestone must not reuse lifecycle phase name: ${milestone.goal_phase}`);
+        }
+        if (!milestone.objective?.trim())
+            errors.push(`missing goal milestone objective: ${milestone.goal_phase || "unknown"}`);
+        if (!Array.isArray(milestone.slice_ids) || milestone.slice_ids.length === 0) {
+            errors.push(`missing goal milestone slice ids: ${milestone.goal_phase || "unknown"}`);
+        }
+        if (!milestone.phase_verify?.trim())
+            errors.push(`missing goal milestone verify gate: ${milestone.goal_phase || "unknown"}`);
+        if (!Array.isArray(milestone.pass_criteria) || milestone.pass_criteria.length === 0) {
+            errors.push(`missing goal milestone pass criteria: ${milestone.goal_phase || "unknown"}`);
+        }
+        if (!["planned", "running", "check_passed", "needs_convergence", "converged", "blocked"].includes(milestone.status)) {
+            errors.push(`invalid goal milestone status: ${milestone.goal_phase || "unknown"}`);
+        }
+    }
     const calculatedHash = hashExecutionPlan(plan);
     if (plan.approval_subject_hash && plan.approval_subject_hash !== calculatedHash) {
         errors.push("execution plan hash mismatch");

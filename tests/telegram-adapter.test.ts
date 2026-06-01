@@ -35,10 +35,13 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.equal(result.route?.command, "/plan");
     assert.match(result.telegram_text, /Status: plan_created/);
     assert.match(result.telegram_text, /Run: \d{6}/);
+    assert.match(result.telegram_text, /Plan/);
+    assert.match(result.telegram_text, /Outcome:/);
     assert.match(result.telegram_text, /Approval/);
     assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
     assert.match(result.telegram_text, /Capabilities: create_artifact/);
     assert.match(result.telegram_text, /Next: Review the plan. To continue, reply "approve /);
+    assert.ok(result.telegram_text.indexOf("Plan") < result.telegram_text.indexOf("Approval"));
     assert.ok(result.telegram_text.indexOf("Approval") < result.telegram_text.indexOf("Evidence"));
     assert.ok(result.telegram_text.length < 4000);
     assert.deepEqual(result.command_result?.metadata, {
@@ -121,7 +124,7 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
   try {
     const result = await runTelegramAdapter({
       message: {
-        text: "/goal Build a tiny local dashboard prototype for reviewing Pilot receipts.",
+        text: "/goal Implement a tiny local dashboard prototype for reviewing Pilot receipts.",
         chat_id: "343580315",
         sender_id: "343580315",
         message_id: "23151",
@@ -139,9 +142,12 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     assert.equal(result.command_result?.status, "routed");
     assert.equal(result.route?.command, "/goal");
     assert.equal(result.route?.user_report.status, "goal_plan_created");
+    assert.ok(Array.isArray(result.route?.result_summary?.plan_preview));
     assert.match(result.telegram_text, /Status: goal_plan_created/);
+    assert.match(result.telegram_text, /Phase\/slice plan:/);
     assert.match(result.telegram_text, /Approval/);
     assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
+    assert.match(result.telegram_text, /Goal milestones: \d+ phases, \d+ slices/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /approve \d{6}/);
 

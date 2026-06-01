@@ -5,12 +5,15 @@ OpenClaw Pilot is a local planning, verification, convergence, and scoped-goal C
 Current workspace roadmap and TODO are tracked in
 `/Users/moon/.openclaw/workspace/docs/openclaw-pilot/current-roadmap.md`.
 
+The next PilotLead UX and quality-loop implementation contract is documented
+in `docs/pilotlead-v0.2.8-product-contract.md`.
+
 ## Install
 
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.1
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.8
 pilot init
 pilot plan "Draft a document strategy plan"
 ```

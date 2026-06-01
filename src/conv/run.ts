@@ -31,12 +31,22 @@ function needsApproval(request: ConvRequest): boolean {
   return request.preflight.risk_class !== "low";
 }
 
-function hasOpenFindings(findings: ConvFinding[]): boolean {
-  return findings.some((finding) => finding.status === "open");
+function findingPriority(finding: ConvFinding): NonNullable<ConvFinding["priority"]> {
+  return finding.priority || "P2";
 }
 
-function nextOpenFinding(findings: ConvFinding[]): ConvFinding | undefined {
-  return findings.find((finding) => finding.status === "open");
+function hasBlockingOpenFindings(findings: ConvFinding[]): boolean {
+  return findings.some((finding) => finding.status === "open" && findingPriority(finding) !== "P3");
+}
+
+function nextOpenBlockingFinding(findings: ConvFinding[]): ConvFinding | undefined {
+  return findings.find((finding) => finding.status === "open" && findingPriority(finding) !== "P3");
+}
+
+function openFindingRisks(findings: ConvFinding[]): string[] {
+  return findings
+    .filter((finding) => finding.status === "open")
+    .map((finding) => `${finding.id}: ${finding.description}`);
 }
 
 function nextRoundNumber(rounds: ConvRound[]): number {
@@ -208,10 +218,10 @@ async function continueConvRun(options: {
   } else {
     for (
       let round = nextRoundNumber(options.rounds);
-      round <= options.request.preflight.max_rounds && hasOpenFindings(options.findings);
+      round <= options.request.preflight.max_rounds && hasBlockingOpenFindings(options.findings);
       round += 1
     ) {
-      const finding = nextOpenFinding(options.findings);
+      const finding = nextOpenBlockingFinding(options.findings);
       if (!finding) break;
 
       const evidenceUpdate = join(options.artifactDir, `round-${round}-evidence-update.md`);
@@ -229,6 +239,7 @@ async function continueConvRun(options: {
         "utf8",
       );
       finding.status = "reduced";
+      const remainingRisks = openFindingRisks(options.findings);
 
       options.rounds.push({
         round,
@@ -236,6 +247,14 @@ async function continueConvRun(options: {
         action_summary: `Reduced finding ${finding.id} with a local evidence update.`,
         evidence_update: evidenceUpdate,
         verdict: "reduced",
+        summary: {
+          target_reviewed: options.request.anchor.path || options.request.anchor.description || options.request.anchor.id,
+          prior_issue_resolution: `Reduced existing finding ${finding.id}.`,
+          new_issues: [],
+          delta_summary: `Added local evidence update ${evidenceUpdate}.`,
+          remaining_risks: remainingRisks.length ? remainingRisks : ["none"],
+          next_action: remainingRisks.length ? "continue" : "complete",
+        },
       });
       receipts.push({
         schema_version: "pilot.receipt.v0",
@@ -262,7 +281,7 @@ async function continueConvRun(options: {
       );
     }
 
-    status = hasOpenFindings(options.findings) ? "max_rounds_reached" : "completed";
+    status = hasBlockingOpenFindings(options.findings) ? "max_rounds_reached" : "completed";
     options.events.push({
       timestamp: options.createdAt,
       run_id: options.runId,

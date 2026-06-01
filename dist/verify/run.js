@@ -63,17 +63,20 @@ async function collectFindings(packet, packetPath) {
             severity: "error",
         });
     }
-    if (findings.length === 0 && packet.reviewer_boundary.semantic_review_required) {
+    const blockingStructuralFindings = findings.some((finding) => finding.severity === "error");
+    if (!blockingStructuralFindings && packet.reviewer_boundary.semantic_review_required && (packet.specialized_reviewers || []).length < 2) {
         findings.push({
-            code: "semantic_review_not_performed",
-            message: "Deterministic verifier checked structure only; semantic sufficiency remains reviewer-owned.",
-            severity: "info",
+            code: "semantic_reviewers_missing",
+            message: "Full semantic /verify requires at least two specialized reviewers; deterministic checks alone cannot produce the semantic verdict.",
+            severity: "error",
         });
     }
     return findings;
 }
 function chooseVerdict(findings) {
     if (findings.some((finding) => finding.code === "schema_invalid"))
+        return "blocked";
+    if (findings.some((finding) => finding.code === "semantic_reviewers_missing"))
         return "blocked";
     if (findings.some((finding) => finding.code === "artifact_missing" || finding.code === "evidence_missing")) {
         return "missing_evidence";
@@ -85,6 +88,43 @@ function chooseVerdict(findings) {
     }
     return "sufficient_evidence";
 }
+function chooseSemanticVerdict(packet, findings) {
+    if (!packet.reviewer_boundary.semantic_review_required)
+        return "not_requested";
+    if (findings.some((finding) => finding.code === "semantic_reviewers_missing"))
+        return "incomplete";
+    if (findings.some((finding) => finding.code === "schema_invalid"))
+        return "blocked";
+    if (findings.some((finding) => finding.severity === "error"))
+        return "blocked";
+    const reviewers = packet.specialized_reviewers || [];
+    if (reviewers.some((reviewer) => reviewer.verdict === "blocked"))
+        return "blocked";
+    if (reviewers.some((reviewer) => reviewer.verdict === "fail"))
+        return "fail";
+    if (reviewers.some((reviewer) => reviewer.verdict === "needs_revision"))
+        return "needs_revision";
+    if (reviewers.some((reviewer) => reviewer.verdict === "pass_with_risks" || reviewer.confidence === "low")) {
+        return "pass_with_risks";
+    }
+    return "pass";
+}
+function reviewerSummary(packet, reviewers) {
+    if (!packet.reviewer_boundary.semantic_review_required) {
+        return {
+            required: false,
+            reviewer_count: reviewers.length,
+            minimum_required: 0,
+            status: "not_requested",
+        };
+    }
+    return {
+        required: true,
+        reviewer_count: reviewers.length,
+        minimum_required: 2,
+        status: reviewers.length >= 2 ? "completed" : "missing_reviewers",
+    };
+}
 export async function runVerify(options) {
     const packetPath = resolve(options.packetPath);
     const packet = JSON.parse(await readFile(packetPath, "utf8"));
@@ -95,6 +135,8 @@ export async function runVerify(options) {
     const artifactDir = await prepareRunDirectory(stateRoot, runId);
     const findings = await collectFindings(packet, packetPath);
     const verdict = chooseVerdict(findings);
+    const reviewers = packet.specialized_reviewers || [];
+    const semanticVerdict = chooseSemanticVerdict(packet, findings);
     const files = {
         verification: join(artifactDir, "verification.json"),
         events: join(artifactDir, "events.jsonl"),
@@ -105,6 +147,8 @@ export async function runVerify(options) {
         run_id: runId,
         packet,
         verdict,
+        semantic_verdict: semanticVerdict,
+        reviewer_summary: reviewerSummary(packet, reviewers),
         findings,
         created_at: createdAt,
         artifact_dir: artifactDir,
@@ -123,7 +167,7 @@ export async function runVerify(options) {
             run_id: runId,
             event: "verify_completed",
             status: verdict,
-            details: { semantic_judgment: "not_performed" },
+            details: { semantic_judgment: semanticVerdict },
         },
     ];
     await writeJson(files.verification, result);

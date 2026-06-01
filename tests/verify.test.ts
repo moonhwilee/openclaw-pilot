@@ -56,6 +56,24 @@ function basePacket(evidencePath: string): EvidencePacket {
       semantic_review_required: true,
       deterministic_checks_only: true,
     },
+    specialized_reviewers: [
+      {
+        id: "reviewer-product",
+        role: "Product verifier",
+        specialty: "Goal fit and user expectation",
+        verdict: "pass",
+        confidence: "high",
+        notes: ["The evidence is structurally present for this fixture."],
+      },
+      {
+        id: "reviewer-engineering",
+        role: "Engineering verifier",
+        specialty: "Artifact and regression risk",
+        verdict: "pass",
+        confidence: "high",
+        notes: ["The required artifact exists and maps to the required criterion."],
+      },
+    ],
   };
 }
 
@@ -73,6 +91,8 @@ test("pilot verify returns sufficient_evidence for a well-formed document fixtur
   });
 
   assert.equal(result.verdict, "sufficient_evidence");
+  assert.equal(result.semantic_verdict, "pass");
+  assert.equal(result.reviewer_summary.status, "completed");
   assert.equal(result.created_files.length, 4);
   assert.equal(await fileExists(join(result.artifact_dir, "verification.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "events.jsonl")), true);
@@ -85,7 +105,28 @@ test("pilot verify returns sufficient_evidence for a well-formed document fixtur
   assert.ok(verification.created_files.some((path: string) => path.endsWith("lineage.jsonl")));
   const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
   assert.ok(lineage.includes('"command":"/verify"'));
-  assert.match(await readFile(join(result.artifact_dir, "events.jsonl"), "utf8"), /"semantic_judgment":"not_performed"/);
+  assert.match(await readFile(join(result.artifact_dir, "events.jsonl"), "utf8"), /"semantic_judgment":"pass"/);
+});
+
+test("pilot verify blocks full semantic verdict without two specialized reviewers", async () => {
+  const root = await tempRoot("pilot-verify-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const artifactPath = join(root, "plan.md");
+  await writeFile(artifactPath, "# Plan\n", "utf8");
+  const packet = basePacket(artifactPath);
+  packet.specialized_reviewers = packet.specialized_reviewers?.slice(0, 1);
+  const packetPath = await writePacket(root, packet);
+
+  const result = await runVerify({
+    packetPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.verdict, "blocked");
+  assert.equal(result.semantic_verdict, "incomplete");
+  assert.equal(result.reviewer_summary.status, "missing_reviewers");
+  assert.ok(result.findings.some((finding) => finding.code === "semantic_reviewers_missing"));
 });
 
 test("pilot verify reports missing_evidence when required artifact is absent", async () => {
@@ -199,6 +240,7 @@ test("Phase 2 CLI verify smoke evaluates a packet", async () => {
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.verdict, "sufficient_evidence");
+  assert.equal(output.semantic_verdict, "pass");
   assert.equal(await fileExists(join(output.artifact_dir, "verification.json")), true);
 });
 
@@ -211,6 +253,7 @@ test("document_strategy fixture can be verified from the repository", () => {
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.verdict, "sufficient_evidence");
+  assert.equal(output.semantic_verdict, "pass");
 });
 
 test("goal command requires a goal request JSON path", () => {

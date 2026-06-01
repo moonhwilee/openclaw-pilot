@@ -31,14 +31,30 @@ function executionPlanApprovalPreview(plan, shortId, runId) {
     const capabilities = [...new Set(plan.steps.map((step) => step.capability))].join(", ");
     const riskClasses = [...new Set(plan.steps.map((step) => step.risk_class))].join(", ");
     const expectedArtifacts = [...new Set(plan.steps.flatMap((step) => step.expected_artifacts))].slice(0, 5).join(", ");
+    const milestoneCount = plan.goal_milestones?.length || 0;
+    const sliceCount = plan.goal_milestones?.reduce((count, milestone) => count + milestone.slice_ids.length, 0) || 0;
     return [
         `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
         `Steps: ${plan.steps.length}`,
+        ...(milestoneCount > 0 ? [`Goal milestones: ${milestoneCount} phases, ${sliceCount} slices`] : []),
         `Capabilities: ${capabilities || "none"}`,
         `Risk: ${riskClasses || "none"}`,
         `Expected artifacts: ${expectedArtifacts || "none"}`,
         `Command: approve ${shortId}`,
         `Full run_id: ${runId}`,
+    ];
+}
+function planPreview(plan) {
+    const phaseCount = plan.phase_plan?.length || 0;
+    const sliceCount = plan.phase_plan?.reduce((count, phase) => count + phase.slices.length, 0) || 0;
+    return [
+        `Goal: ${plan.goal}`,
+        ...(plan.outcome_summary ? [`Outcome: ${plan.outcome_summary}`] : []),
+        ...(plan.context_summary?.length ? [`Context: ${plan.context_summary[0]}`] : []),
+        phaseCount > 0
+            ? `Phase/slice plan: ${phaseCount} goal phases, ${sliceCount} implementation slices.`
+            : "Phase/slice plan: not needed for this small planning loop.",
+        `Verification gates: ${plan.verification_gates.slice(0, 2).join("; ")}`,
     ];
 }
 async function readPlanApprovalPreview(artifactDir, shortId, runId) {
@@ -1120,6 +1136,7 @@ export async function runRoute(options) {
                 state_root: result.goal.state_root,
                 artifact_dir: result.artifact_dir,
                 created_files: result.created_files,
+                plan_preview: planPreview(result.plan),
                 profile_expectations: profileExpectationSummary(result.goal.profile),
             },
             user_report: userReport(result.status === "completed_plan" ? "plan_created" : result.status, result.created_files, result.status === "needs_user_decision"
@@ -1141,12 +1158,14 @@ export async function runRoute(options) {
             backend: "openclaw-pilot",
             result_summary: {
                 verdict: result.verdict,
+                semantic_verdict: result.semantic_verdict,
+                reviewer_summary: result.reviewer_summary,
                 run_id: result.run_id,
                 artifact_dir: result.artifact_dir,
                 created_files: result.created_files,
                 profile_expectations: profileExpectationSummary(result.packet.claim.profile),
             },
-            user_report: userReport(result.verdict, result.created_files, findingRisks(result.findings), result.verdict === "sufficient_evidence"
+            user_report: userReport(result.semantic_verdict !== "not_requested" ? `semantic_${result.semantic_verdict}` : result.verdict, result.created_files, findingRisks(result.findings), result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
                 ? "Use the verification artifact as the evidence pointer for the next step."
                 : "Revise the evidence packet or run /conv against the listed findings."),
         };
@@ -1233,6 +1252,7 @@ export async function runRoute(options) {
                 state_root: result.goal.state_root,
                 artifact_dir: result.artifact_dir,
                 created_files: result.created_files,
+                plan_preview: planPreview(result.plan),
                 profile_expectations: profileExpectationSummary(result.goal.profile),
             },
             user_report: userReport(result.status === "completed_plan" ? "goal_plan_created" : "goal_needs_clarification", result.created_files, result.status === "needs_user_decision"

@@ -10,6 +10,7 @@ export type VerificationVerdict =
   | "blocked";
 
 export type RiskClass = "low" | "medium" | "high";
+export type IssuePriority = "P0" | "P1" | "P2" | "P3";
 
 export type ConvStatus =
   | "completed"
@@ -70,8 +71,44 @@ export type ActionBoundaries = {
   disallowed_actions: string[];
 };
 
+export type GoalPhaseSlice = {
+  id: string;
+  objective: string;
+  check: string[];
+  convergence_gate: string;
+};
+
+export type GoalPhasePlan = {
+  goal_phase: string;
+  objective: string;
+  slices: GoalPhaseSlice[];
+  phase_verify: string;
+  pass_criteria: string[];
+};
+
+export type GoalMilestoneStatus =
+  | "planned"
+  | "running"
+  | "check_passed"
+  | "needs_convergence"
+  | "converged"
+  | "blocked";
+
+export type GoalMilestone = {
+  phase_index: number;
+  goal_phase: string;
+  objective: string;
+  slice_ids: string[];
+  phase_verify: string;
+  pass_criteria: string[];
+  status: GoalMilestoneStatus;
+};
+
 export type CommonPlanContract = {
   goal: string;
+  outcome_summary?: string;
+  context_summary?: string[];
+  phase_plan?: GoalPhasePlan[];
   scope: string[];
   out_of_scope: string[];
   success_criteria: string[];
@@ -144,12 +181,32 @@ export type EvidencePacket = {
     semantic_review_required: boolean;
     deterministic_checks_only: boolean;
   };
+  specialized_reviewers?: SpecializedReviewer[];
+};
+
+export type SemanticVerificationVerdict =
+  | "pass"
+  | "pass_with_risks"
+  | "needs_revision"
+  | "fail"
+  | "blocked"
+  | "incomplete"
+  | "not_requested";
+
+export type SpecializedReviewer = {
+  id: string;
+  role: string;
+  specialty: string;
+  verdict: "pass" | "pass_with_risks" | "needs_revision" | "fail" | "blocked";
+  confidence: "low" | "medium" | "high";
+  notes: string[];
 };
 
 export type VerificationFinding = {
   code: string;
   message: string;
   severity: "info" | "warning" | "error";
+  priority?: IssuePriority;
 };
 
 export type VerificationResult = {
@@ -157,6 +214,13 @@ export type VerificationResult = {
   run_id: string;
   packet: EvidencePacket;
   verdict: VerificationVerdict;
+  semantic_verdict: SemanticVerificationVerdict;
+  reviewer_summary: {
+    required: boolean;
+    reviewer_count: number;
+    minimum_required: number;
+    status: "not_requested" | "missing_reviewers" | "completed";
+  };
   findings: VerificationFinding[];
   created_at: string;
   artifact_dir: string;
@@ -169,6 +233,7 @@ export type ConvFinding = {
   id: string;
   description: string;
   status: ConvFindingStatus;
+  priority?: IssuePriority;
 };
 
 export type ConvPreflight = {
@@ -196,6 +261,16 @@ export type ConvRound = {
   action_summary: string;
   evidence_update: string;
   verdict: "reduced" | "needs_revision" | "blocked";
+  summary?: ConvRoundSummary;
+};
+
+export type ConvRoundSummary = {
+  target_reviewed: string;
+  prior_issue_resolution: string;
+  new_issues: string[];
+  delta_summary: string;
+  remaining_risks: string[];
+  next_action: "continue" | "complete" | "needs_revision" | "blocked";
 };
 
 export type TypedReceipt = {
@@ -277,6 +352,7 @@ export type ExecutionPlan = {
   plan_run_id: string;
   approval_subject_hash: string;
   goal_summary: string;
+  goal_milestones?: GoalMilestone[];
   steps: ExecutionStep[];
   forbidden_actions: string[];
   requires_reapproval_if: string[];

@@ -1,5 +1,5 @@
 import { withExecutionPlanHash } from "../execution-plan.ts";
-import type { CommonPlanContract, ExecutionPlan, RunStatus } from "../types.ts";
+import type { CommonPlanContract, ExecutionPlan, GoalMilestone, GoalPhasePlan, RunStatus } from "../types.ts";
 
 const vagueRequests = new Set(["도와줘", "해줘", "help", "help me", "뭔가 해줘", "알아서 해줘"]);
 
@@ -8,8 +8,80 @@ function requestLooksVague(request: string): boolean {
   return trimmed.length < 12 || vagueRequests.has(trimmed);
 }
 
+function looksLikeLargeImplementation(request: string): boolean {
+  const normalized = request.toLowerCase();
+  return requiresCodexRunner(request) || [
+    "large",
+    "phase",
+    "milestone",
+    "architecture",
+    "migration",
+    "release",
+    "runtime",
+    "큰",
+    "대규모",
+    "페이즈",
+    "마일스톤",
+    "아키텍처",
+    "릴리즈",
+  ].some((token) => normalized.includes(token));
+}
+
+function buildGoalPhasePlan(request: string, runCodex: boolean): GoalPhasePlan[] {
+  if (!looksLikeLargeImplementation(request)) return [];
+
+  return [
+    {
+      goal_phase: "goal_phase_1_plan_quality",
+      objective: "Improve the user-facing plan before changing execution behavior.",
+      slices: [
+        {
+          id: "slice_1_outcome_first_plan",
+          objective: "Show the understood outcome, assumptions, scope, non-goals, risks, and verification gates before artifact metadata.",
+          check: [
+            "plan.md contains outcome/context sections before artifact-oriented details",
+            "route reply contains a Plan section before Evidence",
+            "typed execution-plan approval hash remains unchanged",
+          ],
+          convergence_gate: "No P0/P1/P2 issue in user-facing plan clarity or approval boundary.",
+        },
+      ],
+      phase_verify: "Lightweight phase check unless this plan is explicitly promoted to full /verify.",
+      pass_criteria: [
+        "The user can understand what will be done before approving execution.",
+        "No lifecycle phase field is reused for product milestones.",
+        "No full semantic /verify is required for this ordinary planning slice.",
+      ],
+    },
+    {
+      goal_phase: "goal_phase_2_runtime_milestones",
+      objective: "Introduce milestone data only after the user-facing plan contract is stable.",
+      slices: [
+        {
+          id: "slice_1_model_separation",
+          objective: "Keep lifecycle phases such as execute/verify/converge separate from goal milestones.",
+          check: [
+            "new milestone fields use goal_phase, milestone, or phase_index naming",
+            "existing lifecycle current_phase values remain execute/verify/converge/reverify/report",
+          ],
+          convergence_gate: "No naming collision or stale approval path introduced.",
+        },
+      ],
+      phase_verify: runCodex
+        ? "Phase-level semantic verification should classify findings as P0/P1/P2/P3 before continuing."
+        : "Phase check can remain deterministic while execution is not performed.",
+      pass_criteria: [
+        "P0/P1/P2 issues are fixed before the phase passes.",
+        "P3 issues are reported and do not accumulate into user-facing quality risk.",
+      ],
+    },
+  ];
+}
+
 export function buildPlan(request: string): { status: RunStatus; ambiguityQuestions: string[]; plan: CommonPlanContract } {
   const vague = requestLooksVague(request);
+  const codexRunnerLikely = !vague && requiresCodexRunner(request);
+  const phasePlan = vague ? [] : buildGoalPhasePlan(request, codexRunnerLikely);
   const ambiguityQuestions = vague
     ? [
         "What concrete outcome should this plan target?",
@@ -22,6 +94,16 @@ export function buildPlan(request: string): { status: RunStatus; ambiguityQuesti
 
   const plan: CommonPlanContract = {
     goal: vague ? "Clarify the requested planning goal before execution." : request.trim(),
+    outcome_summary: vague
+      ? "Pilot needs a sharper target before it can produce an approval-ready plan."
+      : "Pilot will create an approval-ready plan first; execution remains blocked until the typed execution plan is explicitly approved.",
+    context_summary: [
+      "Pilot has only the user request and local Pilot planning contract at this stage.",
+      "The human-readable plan is guidance; the typed execution-plan hash remains the only execution authority.",
+      phasePlan.length
+        ? "This request looks broad enough to require phase-gated planning and small implementation slices."
+        : "This request is small enough to start as a single planning loop unless later context expands the risk.",
+    ],
     scope: [
       "Create a local planning artifact only.",
       "Define goal, scope, success criteria, risks, action boundaries, and verification gates.",
@@ -68,6 +150,7 @@ export function buildPlan(request: string): { status: RunStatus; ambiguityQuesti
       "Validate final.md reports planning-only completion.",
       "Validate no execution artifacts are produced.",
     ],
+    phase_plan: phasePlan,
     ambiguity_questions: ambiguityQuestions,
     next_recommended_step: vague
       ? "Answer the ambiguity questions, then rerun pilot plan with a concrete request."
@@ -81,6 +164,20 @@ export function buildPlan(request: string): { status: RunStatus; ambiguityQuesti
   };
 
   return { status, ambiguityQuestions, plan };
+}
+
+function buildGoalMilestones(phasePlan: GoalPhasePlan[] | undefined): GoalMilestone[] | undefined {
+  if (!phasePlan?.length) return undefined;
+
+  return phasePlan.map((phase, index) => ({
+    phase_index: index + 1,
+    goal_phase: phase.goal_phase,
+    objective: phase.objective,
+    slice_ids: phase.slices.map((slice) => slice.id),
+    phase_verify: phase.phase_verify,
+    pass_criteria: phase.pass_criteria,
+    status: "planned",
+  }));
 }
 
 function selectsPilotReceiptsDashboardStep(request: string): boolean {
@@ -136,7 +233,11 @@ function requiresCodexRunner(request: string): boolean {
   ].some((token) => normalized.includes(token));
 }
 
-export function buildExecutionPlan(request: string, planRunId: string): ExecutionPlan | undefined {
+export function buildExecutionPlan(
+  request: string,
+  planRunId: string,
+  phasePlan?: GoalPhasePlan[],
+): ExecutionPlan | undefined {
   if (requestLooksVague(request)) return undefined;
 
   const capability = selectsPilotReceiptsDashboardStep(request)
@@ -167,6 +268,7 @@ export function buildExecutionPlan(request: string, planRunId: string): Executio
     schema_version: "pilot.execution_plan.v0",
     plan_run_id: planRunId,
     goal_summary: request.trim(),
+    goal_milestones: buildGoalMilestones(phasePlan),
     steps: [
       {
         id: "step-1",

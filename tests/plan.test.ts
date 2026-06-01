@@ -83,6 +83,34 @@ test("generated plan satisfies the Common Plan Contract", async () => {
   assert.deepEqual(validateCommonPlanContract(result.plan), []);
 });
 
+test("large implementation plans include outcome-first phase and slice guidance", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = await runPlan({
+    request: "Implement a large refactor of Pilot goal planning with phase gated runtime milestones.",
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed_plan");
+  assert.match(result.plan.outcome_summary || "", /approval-ready plan/);
+  assert.ok(result.plan.context_summary?.some((item) => item.includes("typed execution-plan hash")));
+  assert.ok(result.plan.phase_plan?.length);
+  assert.ok(result.plan.phase_plan?.every((phase) => !["execute", "verify", "converge", "reverify", "report"].includes(phase.goal_phase)));
+  assert.deepEqual(validateCommonPlanContract(result.plan), []);
+
+  const planMarkdown = await readFile(join(result.artifact_dir, "plan.md"), "utf8");
+  assert.ok(planMarkdown.indexOf("## Outcome First") < planMarkdown.indexOf("## Scope"));
+  assert.match(planMarkdown, /## Phase \/ Slice Plan/);
+  assert.match(planMarkdown, /goal_phase_1_plan_quality/);
+
+  const executionPlan = JSON.parse(await readFile(join(result.artifact_dir, "execution-plan.json"), "utf8"));
+  assert.deepEqual(validateExecutionPlan(executionPlan), []);
+  assert.ok(executionPlan.goal_milestones?.length);
+  assert.equal(executionPlan.goal_milestones[0].phase_index, 1);
+  assert.equal(executionPlan.goal_milestones[0].status, "planned");
+  assert.ok(executionPlan.goal_milestones[0].slice_ids.includes("slice_1_outcome_first_plan"));
+});
+
 test("overbroad allowed actions are rejected by schema validation", () => {
   const plan: CommonPlanContract = {
     goal: "Bad plan",
@@ -100,6 +128,80 @@ test("overbroad allowed actions are rejected by schema validation", () => {
 
   const errors = validateCommonPlanContract(plan);
   assert.ok(errors.some((error) => error.includes("overbroad allowed action")));
+});
+
+test("goal phases must not reuse lifecycle phase names", () => {
+  const plan: CommonPlanContract = {
+    goal: "Bad phase plan",
+    outcome_summary: "Bad phase plan should fail validation.",
+    context_summary: ["testing invalid phase naming"],
+    phase_plan: [
+      {
+        goal_phase: "execute",
+        objective: "This collides with lifecycle phase naming.",
+        slices: [
+          {
+            id: "slice_1",
+            objective: "bad slice",
+            check: ["check"],
+            convergence_gate: "gate",
+          },
+        ],
+        phase_verify: "verify",
+        pass_criteria: ["pass"],
+      },
+    ],
+    scope: ["scope"],
+    out_of_scope: ["none"],
+    success_criteria: ["done"],
+    risks_assumptions: ["risk"],
+    action_boundaries: {
+      allowed_actions: ["create_plan_artifact"],
+      approval_required_actions: [],
+      disallowed_actions: [],
+    },
+    verification_gates: ["review"],
+  };
+
+  const errors = validateCommonPlanContract(plan);
+  assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
+});
+
+test("execution plan milestones must not reuse lifecycle phase names", () => {
+  const executionPlan = {
+    schema_version: "pilot.execution_plan.v0" as const,
+    plan_run_id: "test-plan",
+    approval_subject_hash: "",
+    goal_summary: "Bad milestone plan",
+    goal_milestones: [
+      {
+        phase_index: 1,
+        goal_phase: "verify",
+        objective: "This collides with lifecycle phase naming.",
+        slice_ids: ["slice_1"],
+        phase_verify: "phase check",
+        pass_criteria: ["pass"],
+        status: "planned" as const,
+      },
+    ],
+    steps: [
+      {
+        id: "step-1",
+        capability: "create_artifact",
+        risk_class: "low" as const,
+        scope: ["Create a bounded local artifact."],
+        inputs: {},
+        expected_artifacts: ["artifact.md"],
+        verification_gates: ["artifact exists"],
+        stop_conditions: ["success_criteria_met"],
+      },
+    ],
+    forbidden_actions: ["external_message"],
+    requires_reapproval_if: ["scope changes"],
+  };
+
+  const errors = validateExecutionPlan(executionPlan);
+  assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
 });
 
 test("CLI goal mode requires a structured request path", () => {

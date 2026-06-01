@@ -26,5 +26,27 @@
   "reviewer_boundary": {
     "semantic_review_required": true,
     "deterministic_checks_only": true
-  }
+  },
+  "specialized_reviewers": [
+    {
+      "id": "reviewer-document-strategy",
+      "role": "Document strategy verifier",
+      "specialty": "Fixture claim and planning artifact sufficiency",
+      "verdict": "pass",
+      "confidence": "high",
+      "notes": [
+        "The required document strategy artifact is present and mapped to the required criterion."
+      ]
+    },
+    {
+      "id": "reviewer-engineering",
+      "role": "Engineering verifier",
+      "specialty": "Local artifact and schema evidence",
+      "verdict": "pass",
+      "confidence": "high",
+      "notes": [
+        "The fixture evidence stays local and in scope."
+      ]
+    }
+  ]
 }

@@ -52,10 +52,16 @@ function bulletLines(values: string[]): string[] {
   return values.map((value) => `- ${value}`);
 }
 
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 function formatRouteReply(route: RouteResult): string {
   const report = route.user_report;
   const usage = typeof route.result_summary?.usage === "string" ? route.result_summary.usage : undefined;
   const example = typeof route.result_summary?.example === "string" ? route.result_summary.example : undefined;
+  const planPreview = stringList(route.result_summary?.plan_preview);
   const runId = typeof route.result_summary?.run_id === "string" ? route.result_summary.run_id : undefined;
   const shortRunId =
     typeof route.result_summary?.short_run_id === "string" ? route.result_summary.short_run_id : undefined;
@@ -75,6 +81,7 @@ function formatRouteReply(route: RouteResult): string {
     `Command: ${route.command}`,
     ...(runId ? [`Run: ${shortRunId || runId}`, ...(shortRunId ? [`Run ID: ${runId}`] : [])] : []),
     ...(usage ? ["", "Usage", `- ${usage}`, ...(example ? ["", "Example", `- ${example}`] : [])] : []),
+    ...(planPreview.length ? ["", "Plan", ...bulletLines(planPreview)] : []),
     ...(report.approval_preview?.length ? ["", "Approval", ...bulletLines(report.approval_preview)] : []),
     "",
     "Evidence",

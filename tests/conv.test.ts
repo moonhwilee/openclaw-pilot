@@ -82,6 +82,10 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(result.status, "completed");
   assert.equal(result.findings[0].status, "reduced");
   assert.equal(result.rounds.length, 1);
+  assert.equal(result.rounds[0].summary?.prior_issue_resolution, "Reduced existing finding finding-one.");
+  assert.deepEqual(result.rounds[0].summary?.new_issues, []);
+  assert.deepEqual(result.rounds[0].summary?.remaining_risks, ["none"]);
+  assert.equal(result.rounds[0].summary?.next_action, "complete");
   assert.ok(result.created_files.includes(result.rounds[0].evidence_update));
   assert.equal(await fileExists(join(result.artifact_dir, "conv.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "conv-request.json")), true);
@@ -102,6 +106,7 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(checkpoint.schema_version, "pilot.conv_checkpoint.v0");
   assert.equal(checkpoint.status, "completed");
   assert.equal(checkpoint.rounds.length, 1);
+  assert.match(await readFile(join(result.artifact_dir, "final.md"), "utf8"), /prior issue: Reduced existing finding finding-one/);
 });
 
 test("pilot conv blocks missing anchor paths", async () => {
@@ -144,6 +149,44 @@ test("pilot conv stops at max rounds when findings remain", async () => {
   assert.equal(result.status, "max_rounds_reached");
   assert.equal(result.rounds.length, 1);
   assert.ok(result.findings.some((finding) => finding.status === "open"));
+});
+
+test("pilot conv can pass when only P3 findings remain", async () => {
+  const root = await tempRoot("pilot-conv-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseConvRequest();
+  request.findings[0].priority = "P3";
+  const requestPath = join(root, "conv.json");
+  await writeJson(requestPath, request);
+
+  const result = await runConv({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.rounds.length, 0);
+  assert.equal(result.findings[0].status, "open");
+  assert.equal(result.findings[0].priority, "P3");
+});
+
+test("pilot conv rejects invalid finding priorities", async () => {
+  const root = await tempRoot("pilot-conv-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseConvRequest();
+  request.findings[0].priority = "P4" as "P3";
+  const requestPath = join(root, "conv.json");
+  await writeJson(requestPath, request);
+
+  const result = await runConv({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "needs_user_decision");
+  assert.equal(result.rounds.length, 0);
 });
 
 test("pilot conv asks for approval on ambiguous higher-risk requests", async () => {
@@ -249,6 +292,24 @@ test("verify-fail to conv to verify fixture stays bounded", async () => {
   assert.equal(convResult.status, "completed");
 
   packet.evidence[0].path = convResult.rounds[0].evidence_update;
+  packet.specialized_reviewers = [
+    {
+      id: "reviewer-convergence",
+      role: "Convergence verifier",
+      specialty: "Fix confirmation",
+      verdict: "pass",
+      confidence: "high",
+      notes: ["The convergence round produced the missing evidence update."],
+    },
+    {
+      id: "reviewer-engineering",
+      role: "Engineering verifier",
+      specialty: "Local artifact and evidence mapping",
+      verdict: "pass",
+      confidence: "high",
+      notes: ["The updated evidence path points to the local convergence artifact."],
+    },
+  ];
   await writeJson(packetPath, packet);
   const secondVerify = await runVerify({
     packetPath,

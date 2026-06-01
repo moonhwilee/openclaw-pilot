@@ -68,6 +68,8 @@ async function main(argv: string[]): Promise<number> {
     const result = await runVerify({ packetPath });
     console.log(JSON.stringify({
       verdict: result.verdict,
+      semantic_verdict: result.semantic_verdict,
+      reviewer_summary: result.reviewer_summary,
       run_id: result.run_id,
       artifact_dir: result.artifact_dir,
       created_files: result.created_files,

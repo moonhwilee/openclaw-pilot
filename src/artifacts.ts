@@ -41,10 +41,42 @@ export function renderPlanMarkdown(plan: CommonPlanContract): string {
   const lines = [
     "# Pilot Plan",
     "",
+    "## Outcome First",
+    "",
+    plan.outcome_summary || "Create an approval-ready plan before any execution.",
+    "",
     "## Goal",
     "",
     plan.goal,
     "",
+    "## Context / Assumptions",
+    "",
+    ...(plan.context_summary?.length ? plan.context_summary.map((item) => `- ${item}`) : ["- No additional context captured."]),
+    "",
+    ...(plan.phase_plan?.length
+      ? [
+          "## Phase / Slice Plan",
+          "",
+          ...plan.phase_plan.flatMap((phase) => [
+            `### ${phase.goal_phase}`,
+            "",
+            phase.objective,
+            "",
+            "Slices:",
+            ...phase.slices.flatMap((slice) => [
+              `- ${slice.id}: ${slice.objective}`,
+              ...slice.check.map((check) => `  - check: ${check}`),
+              `  - convergence: ${slice.convergence_gate}`,
+            ]),
+            "",
+            `Phase verify: ${phase.phase_verify}`,
+            "",
+            "Pass criteria:",
+            ...phase.pass_criteria.map((item) => `- ${item}`),
+            "",
+          ]),
+        ]
+      : []),
     "## Scope",
     "",
     ...plan.scope.map((item) => `- ${item}`),
@@ -117,15 +149,17 @@ export function renderVerificationMarkdown(result: VerificationResult): string {
     "# Pilot Verification Result",
     "",
     `Verdict: ${result.verdict}`,
+    `Semantic Verdict: ${result.semantic_verdict}`,
     `Run ID: ${result.run_id}`,
     `Claim: ${result.packet.claim.statement}`,
+    `Specialized Reviewers: ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required}`,
     "",
     "Findings:",
     "",
     ...result.findings.map((finding) => `- ${finding.severity}: ${finding.code} - ${finding.message}`),
     "",
     "Execution: not performed. Phase 2 only evaluates the supplied evidence packet.",
-    "Semantic judgment: not performed by deterministic code.",
+    "Semantic judgment requires the reviewer boundary shown in verification.json.",
     "",
   ].join("\n");
 }
@@ -140,11 +174,25 @@ export function renderConvMarkdown(result: ConvResult): string {
     "",
     "Findings:",
     "",
-    ...result.findings.map((finding) => `- ${finding.status}: ${finding.id} - ${finding.description}`),
+    ...result.findings.map(
+      (finding) => `- ${finding.status}: ${finding.priority || "P2"} ${finding.id} - ${finding.description}`,
+    ),
     "",
     "Rounds:",
     "",
-    ...result.rounds.map((round) => `- round ${round.round}: ${round.verdict} - ${round.action_summary}`),
+    ...result.rounds.flatMap((round) => [
+      `- round ${round.round}: ${round.verdict} - ${round.action_summary}`,
+      ...(round.summary
+        ? [
+            `  - target: ${round.summary.target_reviewed}`,
+            `  - prior issue: ${round.summary.prior_issue_resolution}`,
+            `  - delta: ${round.summary.delta_summary}`,
+            `  - new issues: ${round.summary.new_issues.length ? round.summary.new_issues.join("; ") : "none"}`,
+            `  - remaining risks: ${round.summary.remaining_risks.join("; ")}`,
+            `  - next: ${round.summary.next_action}`,
+          ]
+        : []),
+    ]),
     "",
     "Execution boundary: local artifact notes only. No external action, shell task, agent spawn, goal execution, or Telegram routing.",
     "",
@@ -157,6 +205,7 @@ export function renderGoalRunMarkdown(result: GoalRunResult): string {
     ? "Execution boundary: approved Codex/session runner only. Stop required for actions outside the approved plan."
     : "Execution boundary: scoped local goal artifacts only. No Telegram routing, external action, agent spawn, or dangerous action.";
   const lifecycle = result.lifecycle;
+  const milestones = result.request.execution_plan?.goal_milestones || [];
 
   return [
     "# Pilot Goal Result",
@@ -177,6 +226,17 @@ export function renderGoalRunMarkdown(result: GoalRunResult): string {
           "Lifecycle:",
           "",
           ...lifecycle.steps.map((step) => `- ${step.phase}: ${step.status} - ${step.detail}`),
+          "",
+        ]
+      : []),
+    ...(milestones.length
+      ? [
+          "Goal Milestones:",
+          "",
+          ...milestones.map(
+            (milestone) =>
+              `- ${milestone.phase_index}. ${milestone.goal_phase}: ${milestone.status} (${milestone.slice_ids.length} slices)`,
+          ),
           "",
         ]
       : []),
