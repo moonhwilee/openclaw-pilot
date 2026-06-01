@@ -157,7 +157,19 @@ export function renderConvMarkdown(result) {
         "",
         "Rounds:",
         "",
-        ...result.rounds.map((round) => `- round ${round.round}: ${round.verdict} - ${round.action_summary}`),
+        ...result.rounds.flatMap((round) => [
+            `- round ${round.round}: ${round.verdict} - ${round.action_summary}`,
+            ...(round.summary
+                ? [
+                    `  - target: ${round.summary.target_reviewed}`,
+                    `  - prior issue: ${round.summary.prior_issue_resolution}`,
+                    `  - delta: ${round.summary.delta_summary}`,
+                    `  - new issues: ${round.summary.new_issues.length ? round.summary.new_issues.join("; ") : "none"}`,
+                    `  - remaining risks: ${round.summary.remaining_risks.join("; ")}`,
+                    `  - next: ${round.summary.next_action}`,
+                ]
+                : []),
+        ]),
         "",
         "Execution boundary: local artifact notes only. No external action, shell task, agent spawn, goal execution, or Telegram routing.",
         "",

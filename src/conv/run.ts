@@ -39,6 +39,12 @@ function nextOpenFinding(findings: ConvFinding[]): ConvFinding | undefined {
   return findings.find((finding) => finding.status === "open");
 }
 
+function openFindingRisks(findings: ConvFinding[]): string[] {
+  return findings
+    .filter((finding) => finding.status === "open")
+    .map((finding) => `${finding.id}: ${finding.description}`);
+}
+
 function nextRoundNumber(rounds: ConvRound[]): number {
   return rounds.reduce((max, round) => Math.max(max, round.round), 0) + 1;
 }
@@ -229,6 +235,7 @@ async function continueConvRun(options: {
         "utf8",
       );
       finding.status = "reduced";
+      const remainingRisks = openFindingRisks(options.findings);
 
       options.rounds.push({
         round,
@@ -236,6 +243,14 @@ async function continueConvRun(options: {
         action_summary: `Reduced finding ${finding.id} with a local evidence update.`,
         evidence_update: evidenceUpdate,
         verdict: "reduced",
+        summary: {
+          target_reviewed: options.request.anchor.path || options.request.anchor.description || options.request.anchor.id,
+          prior_issue_resolution: `Reduced existing finding ${finding.id}.`,
+          new_issues: [],
+          delta_summary: `Added local evidence update ${evidenceUpdate}.`,
+          remaining_risks: remainingRisks.length ? remainingRisks : ["none"],
+          next_action: remainingRisks.length ? "continue" : "complete",
+        },
       });
       receipts.push({
         schema_version: "pilot.receipt.v0",

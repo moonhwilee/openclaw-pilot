@@ -82,6 +82,10 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(result.status, "completed");
   assert.equal(result.findings[0].status, "reduced");
   assert.equal(result.rounds.length, 1);
+  assert.equal(result.rounds[0].summary?.prior_issue_resolution, "Reduced existing finding finding-one.");
+  assert.deepEqual(result.rounds[0].summary?.new_issues, []);
+  assert.deepEqual(result.rounds[0].summary?.remaining_risks, ["none"]);
+  assert.equal(result.rounds[0].summary?.next_action, "complete");
   assert.ok(result.created_files.includes(result.rounds[0].evidence_update));
   assert.equal(await fileExists(join(result.artifact_dir, "conv.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "conv-request.json")), true);
@@ -102,6 +106,7 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(checkpoint.schema_version, "pilot.conv_checkpoint.v0");
   assert.equal(checkpoint.status, "completed");
   assert.equal(checkpoint.rounds.length, 1);
+  assert.match(await readFile(join(result.artifact_dir, "final.md"), "utf8"), /prior issue: Reduced existing finding finding-one/);
 });
 
 test("pilot conv blocks missing anchor paths", async () => {

@@ -258,6 +258,16 @@ export type ConvRound = {
   action_summary: string;
   evidence_update: string;
   verdict: "reduced" | "needs_revision" | "blocked";
+  summary?: ConvRoundSummary;
+};
+
+export type ConvRoundSummary = {
+  target_reviewed: string;
+  prior_issue_resolution: string;
+  new_issues: string[];
+  delta_summary: string;
+  remaining_risks: string[];
+  next_action: "continue" | "complete" | "needs_revision" | "blocked";
 };
 
 export type TypedReceipt = {
