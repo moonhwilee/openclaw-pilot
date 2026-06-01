@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { defaultStateRoot } from "../config.js";
 import { appendApprovalEntry } from "../state/approval-index.js";
 import { appendLineageRecord } from "../state/lineage.js";
+import { isRecoveryRunCancelled } from "../state/recovery.js";
 import { resolveRunIndexEntry } from "../state/run-index.js";
 const requiredArtifactNames = ["goal.json", "plan.md", "events.jsonl", "final.md"];
 async function fileExists(path) {
@@ -158,6 +159,7 @@ export async function resolveApprovalTarget(options) {
         };
     }
     const entry = resolution.entry;
+    const cancelled = await isRecoveryRunCancelled(stateRoot, entry.run_id);
     const artifactPaths = requiredArtifactNames.map((name) => join(entry.artifact_dir, name));
     const missingArtifacts = (await Promise.all(artifactPaths.map(async (path, index) => ({
         name: requiredArtifactNames[index],
@@ -167,6 +169,9 @@ export async function resolveApprovalTarget(options) {
         .map((artifact) => artifact.name);
     const goal = await readGoalArtifact(join(entry.artifact_dir, "goal.json"));
     const validationRisks = [];
+    if (cancelled) {
+        validationRisks.push(`Pilot run is cancelled: ${entry.short_run_id}.`);
+    }
     if (missingArtifacts.length > 0) {
         validationRisks.push(`Missing plan artifacts: ${missingArtifacts.join(", ")}.`);
     }

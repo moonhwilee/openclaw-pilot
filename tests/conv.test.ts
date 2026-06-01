@@ -84,6 +84,8 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.equal(result.rounds.length, 1);
   assert.ok(result.created_files.includes(result.rounds[0].evidence_update));
   assert.equal(await fileExists(join(result.artifact_dir, "conv.json")), true);
+  assert.equal(await fileExists(join(result.artifact_dir, "conv-request.json")), true);
+  assert.equal(await fileExists(join(result.artifact_dir, "conv-checkpoint.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "lineage.jsonl")), true);
   assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
@@ -93,7 +95,13 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.match(receipts, /"capability":"local_artifact_note"/);
   const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
   assert.ok(lineage.includes('"command":"/conv"'));
+  assert.ok(lineage.includes('"status":"running"'));
+  assert.ok(lineage.includes('"status":"completed"'));
   assert.match(lineage, /"receipt_pointers":/);
+  const checkpoint = JSON.parse(await readFile(join(result.artifact_dir, "conv-checkpoint.json"), "utf8"));
+  assert.equal(checkpoint.schema_version, "pilot.conv_checkpoint.v0");
+  assert.equal(checkpoint.status, "completed");
+  assert.equal(checkpoint.rounds.length, 1);
 });
 
 test("pilot conv blocks missing anchor paths", async () => {

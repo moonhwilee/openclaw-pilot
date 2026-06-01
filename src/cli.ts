@@ -20,6 +20,10 @@ function usage(): string {
     "  pilot verify <evidence-packet.json>",
     "  pilot conv <conv-request.json>",
     "  pilot goal <goal-request.json>",
+    "  pilot list [limit]",
+    "  pilot status <Run>",
+    "  pilot resume <Run>",
+    "  pilot cancel <Run> [reason]",
     '  pilot route --enabled|--disabled "<exact command>"',
     '  pilot live --enabled=/plan,/verify "<exact command>"',
     "",
@@ -106,6 +110,46 @@ async function main(argv: string[]): Promise<number> {
       steps: result.steps,
     }, null, 2));
     return 0;
+  }
+
+  if (command === "list") {
+    const input = `list ${rest.join(" ").trim()}`.trim();
+    const result = await runRoute({ input, enabled: true });
+    console.log(JSON.stringify(result, null, 2));
+    return 0;
+  }
+
+  if (command === "status") {
+    const reference = rest.join(" ").trim();
+    if (!reference) {
+      console.error("pilot status requires a run reference");
+      return 1;
+    }
+    const result = await runRoute({ input: `status ${reference}`, enabled: true });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === "needs_user_decision" ? 1 : 0;
+  }
+
+  if (command === "resume") {
+    const reference = rest.join(" ").trim();
+    if (!reference) {
+      console.error("pilot resume requires a run reference");
+      return 1;
+    }
+    const result = await runRoute({ input: `resume ${reference}`, enabled: true });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === "needs_user_decision" || result.status === "blocked" ? 1 : 0;
+  }
+
+  if (command === "cancel") {
+    const referenceAndReason = rest.join(" ").trim();
+    if (!referenceAndReason) {
+      console.error("pilot cancel requires a run reference");
+      return 1;
+    }
+    const result = await runRoute({ input: `cancel ${referenceAndReason}`, enabled: true });
+    console.log(JSON.stringify(result, null, 2));
+    return result.status === "needs_user_decision" || result.status === "blocked" ? 1 : 0;
   }
 
   if (command === "route") {

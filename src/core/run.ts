@@ -24,7 +24,17 @@ export type PilotCommandResult = {
   metadata?: Record<string, unknown>;
 };
 
-const exactCommands: PilotCommandName[] = ["/plan", "/verify", "/conv", "/goal", "approve"];
+const exactCommands: PilotCommandName[] = [
+  "/plan",
+  "/verify",
+  "/conv",
+  "/goal",
+  "approve",
+  "list",
+  "status",
+  "resume",
+  "cancel",
+];
 const exactCommandSet = new Set<string>(exactCommands);
 const maxReplyTextLength = 3900;
 
@@ -136,6 +146,11 @@ export async function runPilotCommand(request: PilotCommandRequest): Promise<Pil
   const enabled =
     request.enabledCommands?.includes(typedCommand) ||
     (typedCommand === "approve" && (request.enabledCommands?.includes("/plan") || request.enabledCommands?.includes("/goal"))) ||
+    ((typedCommand === "list" ||
+      typedCommand === "status" ||
+      typedCommand === "resume" ||
+      typedCommand === "cancel") &&
+      (request.enabledCommands?.includes("/plan") || request.enabledCommands?.includes("/goal"))) ||
     false;
 
   try {

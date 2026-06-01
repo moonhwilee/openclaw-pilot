@@ -17,6 +17,8 @@ export type ConvStatus =
   | "needs_user_decision"
   | "blocked";
 
+export type ConvCheckpointStatus = "running" | "completed";
+
 export type GoalRunStatus =
   | "awaiting_approval"
   | "completed"
@@ -225,6 +227,32 @@ export type ConvResult = {
   created_files: string[];
 };
 
+export type ConvCheckpoint = {
+  schema_version: "pilot.conv_checkpoint.v0";
+  run_id: string;
+  status: ConvCheckpointStatus;
+  request: ConvRequest;
+  findings: ConvFinding[];
+  rounds: ConvRound[];
+  next_round: number;
+  max_rounds: number;
+  artifact_dir: string;
+  updated_at: string;
+};
+
+export type VerifyCheckpoint = {
+  schema_version: "pilot.verify_checkpoint.v0";
+  run_id: string;
+  status: "planned" | "running" | "completed";
+  packet_path: string;
+  processed_criteria_ids: string[];
+  processed_evidence_ids: string[];
+  findings_written: VerificationFinding[];
+  next_action: "rerun_verify" | "resume_criteria_scan" | "inspect_manually";
+  artifact_dir: string;
+  updated_at: string;
+};
+
 export type GoalApproval = {
   reference: string;
   approved: boolean;
@@ -302,7 +330,16 @@ export type RouteStatus =
   | "needs_user_decision"
   | "blocked";
 
-export type RouteCommand = "/plan" | "/verify" | "/conv" | "/goal" | "approve";
+export type RouteCommand =
+  | "/plan"
+  | "/verify"
+  | "/conv"
+  | "/goal"
+  | "approve"
+  | "list"
+  | "status"
+  | "resume"
+  | "cancel";
 
 export type RouteUserReport = {
   status: string;
@@ -348,7 +385,7 @@ export type PilotApprovalEntry = {
 export type PilotLineageRecord = {
   schema_version: "pilot.lineage.v0";
   created_at: string;
-  record_type: "run" | "approval";
+  record_type: "run" | "approval" | "recovery";
   command: RouteCommand;
   run_id: string;
   short_run_id: string;
@@ -361,6 +398,48 @@ export type PilotLineageRecord = {
   receipt_pointers?: string[];
   resume_hint: string;
   metadata?: Record<string, string>;
+};
+
+export type PilotRecoveryVisibilityStatus = "fresh" | "stale" | "cancelled" | "terminal";
+
+export type PilotRecoveryVisibility = {
+  status: PilotRecoveryVisibilityStatus;
+  checked_at: string;
+  age_ms: number;
+  stale_after_ms: number;
+  timeout_visible: boolean;
+  restart_visible: boolean;
+  hint: string;
+};
+
+export type PilotRecoveryRunSummary = {
+  run_id: string;
+  short_run_id: string;
+  command: RouteCommand;
+  status: string;
+  created_at: string;
+  artifact_dir: string;
+  resume_hint: string;
+  parent_run_id?: string;
+  approval_reference?: string;
+  recovery: PilotRecoveryVisibility;
+};
+
+export type PilotRecoveryRunStatus = PilotRecoveryRunSummary & {
+  lineage_records: number;
+  latest_lineage?: PilotLineageRecord;
+  run_index_status?: string;
+  source?: {
+    channel?: string;
+    chat_id?: string;
+    sender_id?: string;
+    source_message_id?: string;
+    source_update_id?: string;
+  };
+  lifecycle?: GoalLifecycleSummary;
+  evidence_pointers: string[];
+  receipt_pointers: string[];
+  available_artifacts: string[];
 };
 
 export type RouteResult = {

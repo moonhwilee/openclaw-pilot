@@ -1,16 +1,99 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/plan/run.ts";
 import { runRoute } from "../src/route/run.ts";
+import { runGoal } from "../src/goal/run.ts";
+import { appendApprovalEntry } from "../src/state/approval-index.ts";
+import { appendLineageRecord } from "../src/state/lineage.ts";
 import { appendRunIndexEntry, shortRunId } from "../src/state/run-index.ts";
 import { runVerify } from "../src/verify/run.ts";
+import type { ConvCheckpoint, ConvRequest, GoalRequest, GoalRunResult } from "../src/types.ts";
 
 async function tempStateRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "pilot-state-"));
+}
+
+async function convergenceGoalRequest(root: string, id: string): Promise<string> {
+  const request = JSON.parse(
+    await readFile("fixtures/document_strategy/goal-request-approved.json", "utf8"),
+  ) as GoalRequest;
+  request.goal.id = id;
+  request.plan.verification_gates = [
+    "goal-run.json exists",
+    "receipts.jsonl records execution when approved",
+    "convergence note exists for post-execution gaps",
+  ];
+  request.approval = {
+    reference: `${id}-approval`,
+    approved: true,
+    approved_scope: ["Create one local artifact in the run directory."],
+    approved_capabilities: ["create_artifact"],
+  };
+  const requestPath = join(root, `${id}.json`);
+  await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
+  return requestPath;
+}
+
+function standaloneConvRequest(anchorPath: string): ConvRequest {
+  return {
+    schema_version: "pilot.conv_request.v0",
+    anchor: {
+      id: "standalone-conv-resume",
+      path: anchorPath,
+      description: "Standalone conv resume anchor.",
+    },
+    findings: [
+      { id: "finding-one", description: "Already reduced finding.", status: "reduced" },
+      { id: "finding-two", description: "Open finding to resume.", status: "open" },
+    ],
+    preflight: {
+      risk_class: "low",
+      allowed_capabilities: ["local_artifact_note", "finding_status_update"],
+      forbidden_capabilities: ["external_message", "deploy", "credential_access", "shell_execution", "telegram_routing"],
+      max_rounds: 2,
+      stop_condition: "all_findings_reduced",
+    },
+  };
+}
+
+async function interruptedGoalRun(
+  stateRoot: string,
+  goal: GoalRunResult,
+  suffix: string,
+  mutate: (goalRun: GoalRunResult) => void,
+): Promise<{ run_id: string; artifact_dir: string }> {
+  const runId = `${goal.run_id}-${suffix}`;
+  const artifactDir = join(stateRoot, "runs", runId);
+  await mkdir(artifactDir, { recursive: true });
+  const receipts = await readFile(join(goal.artifact_dir, "receipts.jsonl"), "utf8");
+  await writeFile(join(artifactDir, "receipts.jsonl"), receipts, "utf8");
+  const goalRun = JSON.parse(await readFile(join(goal.artifact_dir, "goal-run.json"), "utf8")) as GoalRunResult;
+  goalRun.run_id = runId;
+  goalRun.status = "blocked";
+  goalRun.artifact_dir = artifactDir;
+  mutate(goalRun);
+  await writeFile(join(artifactDir, "goal-run.json"), `${JSON.stringify(goalRun, null, 2)}\n`, "utf8");
+  await appendRunIndexEntry(stateRoot, {
+    schema_version: "pilot.run_index.v0",
+    created_at: new Date("2026-06-01T00:00:03.000Z").toISOString(),
+    channel: "telegram",
+    chat_id: "343580315",
+    sender_id: "343580315",
+    source_message_id: "23335",
+    source_update_id: "23335",
+    command: "/goal",
+    run_id: runId,
+    short_run_id: shortRunId(runId),
+    status: "goal_execution_interrupted",
+    artifact_dir: artifactDir,
+    next_action: `Run resume ${runId} to continue the interrupted goal.`,
+  });
+  return { run_id: runId, artifact_dir: artifactDir };
 }
 
 test("routing disabled returns explicit unavailable response", async () => {
@@ -44,6 +127,555 @@ test("/plan exact route smoke uses new Pilot backend", async () => {
   assert.match(output.result_summary.short_run_id, /^\d{6}$/);
   assert.equal(output.user_report.status, "plan_created");
   assert.match(output.user_report.next_action, /approve \d{6}/);
+});
+
+test("recovery list and status inspect recent Pilot runs without mutating execution state", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const plan = await runPlan({ request: "Draft a recovery status smoke plan." });
+    const shortId = shortRunId(plan.run_id);
+
+    const list = await runRoute({ input: "list", enabled: true });
+    assert.equal(list.status, "routed");
+    assert.equal(list.command, "list");
+    assert.equal(list.user_report.status, "recovery_list");
+    assert.ok(list.user_report.evidence_pointers.some((pointer) => pointer.includes(shortId)));
+    assert.match(list.user_report.next_action, new RegExp(`status ${shortId}`));
+
+    const status = await runRoute({ input: `status ${shortId}`, enabled: true });
+    assert.equal(status.status, "routed");
+    assert.equal(status.command, "status");
+    assert.equal(status.user_report.status, "completed_plan");
+    assert.match(status.user_report.next_action, /approve/);
+    const run = status.result_summary?.run as { run_id?: string; lineage_records?: number; available_artifacts?: string[] } | undefined;
+    assert.equal(run?.run_id, plan.run_id);
+    assert.equal(run?.lineage_records, 1);
+    assert.ok(run?.available_artifacts?.some((artifact) => artifact.endsWith("final.md")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("recovery cancel marks a run and blocks later approval", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const plan = await runPlan({ request: "Draft a recovery cancel smoke plan." });
+    const shortId = shortRunId(plan.run_id);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23310",
+      source_update_id: "23310",
+      command: "/plan",
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      status: "plan_created",
+      artifact_dir: plan.artifact_dir,
+      next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+    });
+
+    const cancel = await runRoute({ input: `cancel ${shortId} owner changed priority`, enabled: true });
+    assert.equal(cancel.status, "routed");
+    assert.equal(cancel.command, "cancel");
+    assert.equal(cancel.user_report.status, "cancelled");
+    assert.ok(cancel.user_report.evidence_pointers.some((path) => path.endsWith("cancel.json")));
+
+    const status = await runRoute({ input: `status ${shortId}`, enabled: true });
+    assert.equal(status.status, "routed");
+    assert.equal(status.user_report.status, "cancelled");
+
+    const resume = await runRoute({ input: `resume ${shortId}`, enabled: true });
+    assert.equal(resume.status, "blocked");
+    assert.equal(resume.user_report.status, "resume_blocked_cancelled");
+
+    const approve = await runRoute({
+      input: `approve ${shortId}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23311" },
+    });
+    assert.equal(approve.status, "blocked");
+    assert.equal(approve.user_report.status, "approval_target_invalid");
+    assert.ok(approve.user_report.remaining_risks.some((risk) => risk.includes("cancelled")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("recovery status and resume surface stale timeout visibility", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousStaleAfter = process.env.PILOT_RECOVERY_STALE_AFTER_MS;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  process.env.PILOT_RECOVERY_STALE_AFTER_MS = "1";
+  try {
+    const plan = await runPlan({ request: "Draft a stale recovery visibility smoke plan." });
+    const shortId = shortRunId(plan.run_id);
+    await delay(5);
+
+    const status = await runRoute({ input: `status ${shortId}`, enabled: true });
+    assert.equal(status.status, "routed");
+    assert.equal(status.user_report.status, "completed_plan");
+    assert.ok(status.user_report.remaining_risks.some((risk) => risk.includes("freshness window")));
+    const run = status.result_summary?.run as { recovery?: { status?: string; timeout_visible?: boolean } } | undefined;
+    assert.equal(run?.recovery?.status, "stale");
+    assert.equal(run?.recovery?.timeout_visible, true);
+
+    const resume = await runRoute({ input: `resume ${shortId}`, enabled: true });
+    assert.equal(resume.status, "needs_user_decision");
+    assert.equal(resume.user_report.status, "resume_needs_recovery_decision");
+    assert.ok(resume.user_report.remaining_risks.some((risk) => risk.includes("freshness window")));
+    assert.ok(resume.user_report.evidence_pointers.some((pointer) => pointer.endsWith("resume.json")));
+    const resumeArtifact = resume.result_summary?.resume_artifact as string | undefined;
+    assert.ok(resumeArtifact?.endsWith("resume.json"));
+    const directive = JSON.parse(await readFile(resumeArtifact, "utf8")) as {
+      schema_version?: string;
+      automatic_execution_performed?: boolean;
+      process_resume_supported?: boolean;
+    };
+    assert.equal(directive.schema_version, "pilot.recovery_resume_directive.v0");
+    assert.equal(directive.automatic_execution_performed, false);
+    assert.equal(directive.process_resume_supported, false);
+
+    const statusAfterResume = await runRoute({ input: `status ${shortId}`, enabled: true });
+    const runAfterResume = statusAfterResume.result_summary?.run as { recovery?: { status?: string } } | undefined;
+    assert.equal(runAfterResume?.recovery?.status, "stale");
+
+    const list = await runRoute({ input: "list", enabled: true });
+    assert.equal(list.status, "routed");
+    assert.ok(list.user_report.remaining_risks.some((risk) => risk.includes("stale")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousStaleAfter === undefined) {
+      delete process.env.PILOT_RECOVERY_STALE_AFTER_MS;
+    } else {
+      process.env.PILOT_RECOVERY_STALE_AFTER_MS = previousStaleAfter;
+    }
+  }
+});
+
+test("resume auto-runs approved runner work from the execute checkpoint", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousEnv = {
+    enabled: process.env.PILOT_SESSION_RUNNER_ENABLED,
+    command: process.env.PILOT_SESSION_RUNNER_COMMAND,
+    args: process.env.PILOT_SESSION_RUNNER_ARGS_JSON,
+    timeout: process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS,
+  };
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  process.env.PILOT_SESSION_RUNNER_ENABLED = "true";
+  process.env.PILOT_SESSION_RUNNER_COMMAND = process.execPath;
+  process.env.PILOT_SESSION_RUNNER_ARGS_JSON = JSON.stringify([
+    "-e",
+    "process.stdin.resume(); process.stdin.on('end', () => { console.log('auto resume runner ok'); });",
+  ]);
+  process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = "5000";
+  try {
+    const plan = await runPlan({ request: "Implement a tiny auto resume runner smoke check." });
+    const shortId = shortRunId(plan.run_id);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23330",
+      source_update_id: "23330",
+      command: "/goal",
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      status: "goal_plan_created",
+      artifact_dir: plan.artifact_dir,
+      next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+    });
+    await appendApprovalEntry(stateRoot, {
+      schema_version: "pilot.approval.v0",
+      created_at: new Date("2026-06-01T00:00:01.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23331",
+      source_update_id: "23331",
+      reference: shortId,
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      artifact_dir: plan.artifact_dir,
+      status: "approved",
+      approved_scope: [
+        `Approved Codex/session runner execution for Pilot plan run ${shortId}.`,
+        "Execute the concrete work described in the approved plan.",
+      ],
+      approved_capabilities: ["run_codex_session"],
+      next_action: `Run /goal ${shortId} to execute the approved Codex/session runner slice.`,
+    });
+    await appendLineageRecord(stateRoot, {
+      schema_version: "pilot.lineage.v0",
+      created_at: new Date("2026-06-01T00:00:01.000Z").toISOString(),
+      record_type: "approval",
+      command: "approve",
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      status: "approved",
+      state_root: stateRoot,
+      artifact_dir: plan.artifact_dir,
+      evidence_pointers: [],
+      receipt_pointers: [],
+      resume_hint: `Run /goal ${shortId} to execute the approved Codex/session runner slice.`,
+      metadata: { approved_capabilities: "run_codex_session" },
+    });
+
+    const output = await runRoute({
+      input: `resume ${shortId}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23332" },
+    });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "auto_resumed_execute");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-lock.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("auto-resume-attempt.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-result.json")));
+    assert.equal(output.result_summary?.status, "auto_resume_executed");
+    assert.equal(output.result_summary?.checkpoint_phase, "execute");
+
+    const duplicate = await runRoute({ input: `resume ${shortId}`, enabled: true });
+    assert.equal(duplicate.status, "needs_user_decision");
+    assert.ok(duplicate.user_report.remaining_risks.some((risk) => risk.includes("auto-resume lock")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousEnv.enabled === undefined) delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+    else process.env.PILOT_SESSION_RUNNER_ENABLED = previousEnv.enabled;
+    if (previousEnv.command === undefined) delete process.env.PILOT_SESSION_RUNNER_COMMAND;
+    else process.env.PILOT_SESSION_RUNNER_COMMAND = previousEnv.command;
+    if (previousEnv.args === undefined) delete process.env.PILOT_SESSION_RUNNER_ARGS_JSON;
+    else process.env.PILOT_SESSION_RUNNER_ARGS_JSON = previousEnv.args;
+    if (previousEnv.timeout === undefined) delete process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS;
+    else process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = previousEnv.timeout;
+  }
+});
+
+test("resume auto-runs verification from the verify checkpoint without re-executing", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousEnv = {
+    enabled: process.env.PILOT_SESSION_RUNNER_ENABLED,
+    command: process.env.PILOT_SESSION_RUNNER_COMMAND,
+    args: process.env.PILOT_SESSION_RUNNER_ARGS_JSON,
+    timeout: process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS,
+  };
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  process.env.PILOT_SESSION_RUNNER_ENABLED = "true";
+  process.env.PILOT_SESSION_RUNNER_COMMAND = process.execPath;
+  process.env.PILOT_SESSION_RUNNER_ARGS_JSON = JSON.stringify([
+    "-e",
+    "process.stdin.resume(); process.stdin.on('end', () => { console.log('verify checkpoint runner ok'); });",
+  ]);
+  process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = "5000";
+  try {
+    const plan = await runPlan({ request: "Implement a tiny verify checkpoint resume smoke check." });
+    const planShortId = shortRunId(plan.run_id);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23332",
+      source_update_id: "23332",
+      command: "/goal",
+      run_id: plan.run_id,
+      short_run_id: planShortId,
+      status: "goal_plan_created",
+      artifact_dir: plan.artifact_dir,
+      next_action: `Review the plan. To continue, reply "approve ${planShortId}".`,
+    });
+    await appendApprovalEntry(stateRoot, {
+      schema_version: "pilot.approval.v0",
+      created_at: new Date("2026-06-01T00:00:01.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23333",
+      source_update_id: "23333",
+      reference: planShortId,
+      run_id: plan.run_id,
+      short_run_id: planShortId,
+      artifact_dir: plan.artifact_dir,
+      status: "approved",
+      approved_scope: [
+        `Approved Codex/session runner execution for Pilot plan run ${planShortId}.`,
+        "Execute the concrete work described in the approved plan.",
+      ],
+      approved_capabilities: ["run_codex_session"],
+      next_action: `Run /goal ${planShortId} to execute the approved Codex/session runner slice.`,
+    });
+
+    const approvedRequestPath = join(plan.artifact_dir, "approved-goal-request.json");
+    const approved = await runRoute({ input: `approve ${planShortId}`, enabled: true });
+    assert.equal(approved.status, "routed");
+
+    const goal = await runGoal({ requestPath: approvedRequestPath, stateRoot });
+    const interruptedRunId = `${goal.run_id}-verify-checkpoint`;
+    const interruptedShortId = shortRunId(interruptedRunId);
+    const interruptedArtifactDir = join(stateRoot, "runs", interruptedRunId);
+    await mkdir(interruptedArtifactDir, { recursive: true });
+    await writeFile(
+      join(interruptedArtifactDir, "receipts.jsonl"),
+      await readFile(join(goal.artifact_dir, "receipts.jsonl"), "utf8"),
+      "utf8",
+    );
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:02.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23334",
+      source_update_id: "23334",
+      command: "/goal",
+      run_id: interruptedRunId,
+      short_run_id: interruptedShortId,
+      status: "goal_execution_interrupted_before_verify",
+      artifact_dir: interruptedArtifactDir,
+      next_action: `Run resume ${interruptedRunId} to verify the interrupted execution.`,
+    });
+
+    const goalRunPath = join(interruptedArtifactDir, "goal-run.json");
+    const goalRun = JSON.parse(await readFile(join(goal.artifact_dir, "goal-run.json"), "utf8"));
+    delete goalRun.post_execution_verification;
+    delete goalRun.post_execution_convergence;
+    delete goalRun.post_convergence_verification;
+    goalRun.status = "blocked";
+    goalRun.run_id = interruptedRunId;
+    goalRun.artifact_dir = interruptedArtifactDir;
+    await writeFile(goalRunPath, `${JSON.stringify(goalRun, null, 2)}\n`, "utf8");
+
+    const output = await runRoute({ input: `resume ${interruptedRunId}`, enabled: true });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "auto_resumed_verify");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-lock.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("auto-resume-attempt.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-post-execution-evidence.json")));
+    assert.equal(output.result_summary?.status, "auto_resume_executed");
+    assert.equal(output.result_summary?.checkpoint_phase, "verify");
+    assert.equal(output.result_summary?.verification_verdict, "sufficient_evidence");
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousEnv.enabled === undefined) delete process.env.PILOT_SESSION_RUNNER_ENABLED;
+    else process.env.PILOT_SESSION_RUNNER_ENABLED = previousEnv.enabled;
+    if (previousEnv.command === undefined) delete process.env.PILOT_SESSION_RUNNER_COMMAND;
+    else process.env.PILOT_SESSION_RUNNER_COMMAND = previousEnv.command;
+    if (previousEnv.args === undefined) delete process.env.PILOT_SESSION_RUNNER_ARGS_JSON;
+    else process.env.PILOT_SESSION_RUNNER_ARGS_JSON = previousEnv.args;
+    if (previousEnv.timeout === undefined) delete process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS;
+    else process.env.PILOT_SESSION_RUNNER_TIMEOUT_MS = previousEnv.timeout;
+  }
+});
+
+test("resume auto-runs convergence and re-verification from the converge checkpoint", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const root = await mkdtemp(join(tmpdir(), "pilot-route-converge-"));
+    const requestPath = await convergenceGoalRequest(root, "route-converge-resume");
+    const goal = await runGoal({
+      requestPath,
+      stateRoot,
+      now: new Date("2026-06-01T00:05:00.000Z"),
+    });
+    assert.equal(goal.post_execution_verification?.verdict, "insufficient_evidence");
+    assert.equal(goal.post_execution_convergence?.status, "completed");
+    assert.equal(goal.post_convergence_verification?.verdict, "sufficient_evidence");
+
+    const interrupted = await interruptedGoalRun(stateRoot, goal, "converge-checkpoint", (goalRun) => {
+      delete goalRun.post_execution_convergence;
+      delete goalRun.post_convergence_verification;
+    });
+
+    const output = await runRoute({ input: `resume ${interrupted.run_id}`, enabled: true });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "auto_resumed_converge");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-lock.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("auto-resume-attempt.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("post-execution-conv-request.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-post-convergence-evidence.json")));
+    assert.equal(output.result_summary?.status, "auto_resume_executed");
+    assert.equal(output.result_summary?.checkpoint_phase, "converge");
+    assert.equal(output.result_summary?.convergence_status, "completed");
+    assert.equal(output.result_summary?.post_convergence_verification_verdict, "sufficient_evidence");
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("resume auto-runs reverify from the reverify checkpoint without rerunning convergence", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const root = await mkdtemp(join(tmpdir(), "pilot-route-reverify-"));
+    const requestPath = await convergenceGoalRequest(root, "route-reverify-resume");
+    const goal = await runGoal({
+      requestPath,
+      stateRoot,
+      now: new Date("2026-06-01T00:06:00.000Z"),
+    });
+    assert.equal(goal.post_execution_convergence?.status, "completed");
+    assert.equal(goal.post_convergence_verification?.verdict, "sufficient_evidence");
+
+    const interrupted = await interruptedGoalRun(stateRoot, goal, "reverify-checkpoint", (goalRun) => {
+      delete goalRun.post_convergence_verification;
+    });
+
+    const output = await runRoute({ input: `resume ${interrupted.run_id}`, enabled: true });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "auto_resumed_reverify");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-lock.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("auto-resume-attempt.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-post-convergence-evidence.json")));
+    assert.equal(output.result_summary?.status, "auto_resume_executed");
+    assert.equal(output.result_summary?.checkpoint_phase, "reverify");
+    assert.equal(output.result_summary?.verification_verdict, "sufficient_evidence");
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("resume auto-runs standalone conv from a conv checkpoint", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const root = await mkdtemp(join(tmpdir(), "pilot-standalone-conv-resume-"));
+    const anchorPath = join(root, "anchor.md");
+    await writeFile(anchorPath, "# Standalone Conv Resume Anchor\n", "utf8");
+    const runId = "20260601T001000Z-standalone-conv-resume";
+    const shortId = shortRunId(runId);
+    const artifactDir = join(stateRoot, "runs", runId);
+    await mkdir(artifactDir, { recursive: true });
+    const roundOnePath = join(artifactDir, "round-1-evidence-update.md");
+    await writeFile(roundOnePath, "# Conv Evidence Update\n\nFinding: finding-one\n", "utf8");
+    const request = standaloneConvRequest(anchorPath);
+    const checkpoint: ConvCheckpoint = {
+      schema_version: "pilot.conv_checkpoint.v0",
+      run_id: runId,
+      status: "running",
+      request,
+      findings: request.findings,
+      rounds: [
+        {
+          round: 1,
+          finding_ids: ["finding-one"],
+          action_summary: "Reduced finding finding-one with a local evidence update.",
+          evidence_update: roundOnePath,
+          verdict: "reduced",
+        },
+      ],
+      next_round: 2,
+      max_rounds: 2,
+      artifact_dir: artifactDir,
+      updated_at: new Date("2026-06-01T00:10:00.000Z").toISOString(),
+    };
+    const requestPath = join(artifactDir, "conv-request.json");
+    const checkpointPath = join(artifactDir, "conv-checkpoint.json");
+    await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
+    await writeFile(checkpointPath, `${JSON.stringify(checkpoint, null, 2)}\n`, "utf8");
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:10:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23345",
+      source_update_id: "23345",
+      command: "/conv",
+      run_id: runId,
+      short_run_id: shortId,
+      status: "running",
+      artifact_dir: artifactDir,
+      next_action: `Run resume ${runId} to continue standalone /conv from the checkpoint.`,
+    });
+    await appendLineageRecord(stateRoot, {
+      schema_version: "pilot.lineage.v0",
+      created_at: new Date("2026-06-01T00:10:00.000Z").toISOString(),
+      record_type: "run",
+      command: "/conv",
+      run_id: runId,
+      short_run_id: shortId,
+      status: "running",
+      state_root: stateRoot,
+      artifact_dir: artifactDir,
+      evidence_pointers: [requestPath, checkpointPath, roundOnePath],
+      receipt_pointers: [],
+      resume_hint: `Run resume ${runId} to continue standalone /conv from the checkpoint.`,
+      metadata: { checkpoint_path: checkpointPath, last_progress_at: new Date("2026-06-01T00:10:00.000Z").toISOString() },
+    });
+
+    const output = await runRoute({ input: `resume ${runId}`, enabled: true });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.user_report.status, "auto_resumed_conv");
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("resume-lock.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("auto-resume-attempt.json")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("conv-checkpoint.json")));
+    assert.equal(output.result_summary?.status, "auto_resume_executed");
+    assert.equal(output.result_summary?.checkpoint_phase, "conv");
+    assert.equal(output.result_summary?.convergence_status, "completed");
+    assert.equal(output.result_summary?.convergence_rounds, 2);
+
+    const conv = JSON.parse(await readFile(join(artifactDir, "conv.json"), "utf8"));
+    assert.equal(conv.status, "completed");
+    assert.equal(conv.rounds.length, 2);
+    const updatedCheckpoint = JSON.parse(await readFile(checkpointPath, "utf8"));
+    assert.equal(updatedCheckpoint.status, "completed");
+    assert.equal(updatedCheckpoint.rounds.length, 2);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
 });
 
 test("/verify exact route smoke evaluates document fixture", () => {

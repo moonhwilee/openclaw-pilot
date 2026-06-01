@@ -44,6 +44,42 @@ to `lineage.jsonl` in the run directory and `index/lineage.jsonl` under the
 state root. Use the lineage index when recovering or connecting `/plan`,
 `/verify`, `/conv`, `/goal`, and `approve` across one workflow.
 
+Recovery commands inspect that shared state and handle safe cancellation:
+
+```bash
+pilot list
+pilot list 5
+pilot status <Run>
+pilot resume <Run>
+pilot cancel <Run> "owner changed priority"
+```
+
+`pilot list` returns recent runs with short handles, status, artifact
+directories, and resume hints. `pilot status <Run>` accepts a full run id or
+unambiguous short handle and reports lifecycle status, lineage count, source
+metadata, recovery freshness, evidence pointers, receipt pointers, and
+available artifacts. `pilot resume <Run>` writes `resume.json`, computes the
+latest safe phase checkpoint, and can auto-resume approved runner-backed work
+from `execute`, missing post-execution `verify`, fixable `converge`, missing
+post-convergence `reverify`, or standalone `/conv` from `conv-checkpoint.json`.
+Auto-resume
+creates `resume-lock.json` before execution and records the attempt in
+`auto-resume-attempt.json` so repeated resume calls do not duplicate work. It
+does not resume cancelled or terminal runs, and it does not blindly restart from
+the beginning. `pilot cancel <Run>` writes `cancel.json`,
+appends a cancellation lineage record, and blocks later `approve` or `/goal
+<Run>` continuation for that run.
+
+Standalone `/conv` writes `conv-request.json` and `conv-checkpoint.json`, so an
+interrupted convergence run can continue from the next round. Standalone
+`/verify` remains safely rerunnable from its evidence packet today; the
+`pilot.verify_checkpoint.v0` contract is reserved for future long verification
+that needs criteria/evidence-level resume.
+
+Non-terminal, non-cancelled runs are considered stale after 30 minutes by
+default. Set `PILOT_RECOVERY_STALE_AFTER_MS` to tune that window for local
+tests or operational smoke checks.
+
 ## Session Runner
 
 Approved implementation/code/fix/test-like goals can use the minimal
