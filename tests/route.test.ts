@@ -980,6 +980,31 @@ test("/goal freeform route creates a goal-intake plan without execution", async 
   }
 });
 
+test("/goal freeform route treats filesystem paths inside objectives as goal text", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  try {
+    const output = await runRoute({
+      input: String.raw`/goal Create a tiny Pilot end-to-end smoke artifact in /Users/moon/.openclaw/workspace/tmp/pilot-e2e-smoke.txt with one line: "pilot e2e smoke ok". Verify the file exists and report the evidence path.`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23453" },
+    });
+
+    assert.equal(output.status, "routed");
+    assert.equal(output.command, "/goal");
+    assert.equal(output.user_report.status, "goal_plan_created");
+    assert.equal(output.result_summary?.mode, "goal_intake_plan");
+    assert.match(output.user_report.next_action, /approve \d{6}/);
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("goal.json")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("/goal vague freeform route asks for clarification without handoff execution", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   process.env.PILOT_STATE_ROOT = await tempStateRoot();

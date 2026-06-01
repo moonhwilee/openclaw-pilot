@@ -173,7 +173,7 @@ function looksLikeRunReference(value: string): boolean {
 }
 
 function looksLikeGoalRequestPath(value: string): boolean {
-  return /\.json$/i.test(value) || value.includes("/") || value.includes("\\");
+  return /^[^\s]+\.json$/i.test(value.trim());
 }
 
 function parseRunReferenceAndReason(input: string): { reference: string; reason?: string } {

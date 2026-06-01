@@ -153,6 +153,41 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
   }
 });
 
+test("Telegram adapter accepts freeform goal objectives containing filesystem paths", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  try {
+    const result = await runTelegramAdapter({
+      message: {
+        text: String.raw`/goal Create a tiny Pilot end-to-end smoke artifact in /Users/moon/.openclaw/workspace/tmp/pilot-e2e-smoke.txt with one line: "pilot e2e smoke ok". Verify the file exists and report the evidence path.`,
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "23453",
+        update_id: "99053",
+        timestamp: "2026-06-01T21:04:00+09:00",
+        chat_type: "direct",
+      },
+      enabledCommands: ["/goal"],
+      authorization: {
+        allowedChatIds: ["343580315"],
+      },
+    });
+
+    assert.equal(result.authorized, true);
+    assert.equal(result.command_result?.status, "routed");
+    assert.equal(result.route?.command, "/goal");
+    assert.equal(result.route?.user_report.status, "goal_plan_created");
+    assert.match(result.telegram_text, /Status: goal_plan_created/);
+    assert.match(result.telegram_text, /approve \d{6}/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("Telegram adapter shows usage for empty Pilot slash commands", async () => {
   for (const command of ["/plan", "/goal", "/verify", "/conv"] as const) {
     const result = await runTelegramAdapter({
