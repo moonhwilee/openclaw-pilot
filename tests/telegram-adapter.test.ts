@@ -195,6 +195,43 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
   }
 });
 
+test("Telegram adapter records clarification handoffs with source metadata", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  try {
+    const result = await runTelegramAdapter({
+      message: {
+        text: "/goal 도와줘",
+        chat_id: "343580315",
+        sender_id: "343580315",
+        message_id: "24010",
+        update_id: "24010",
+        chat_type: "direct",
+      },
+      enabledCommands: ["/goal"],
+      authorization: {
+        allowedChatIds: ["343580315"],
+      },
+    });
+
+    assert.equal(result.authorized, true);
+    assert.equal(result.command_result?.status, "needs_user_decision");
+    assert.equal(result.route?.user_report.status, "goal_needs_clarification");
+    const indexText = await readFile(join(process.env.PILOT_STATE_ROOT || "", "index", "runs.jsonl"), "utf8");
+    const indexEntry = JSON.parse(indexText.trim());
+    assert.equal(indexEntry.status, "goal_needs_clarification");
+    assert.equal(indexEntry.chat_id, "343580315");
+    assert.equal(indexEntry.sender_id, "343580315");
+    assert.equal(indexEntry.source_message_id, "24010");
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("Telegram adapter accepts freeform goal objectives containing filesystem paths", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   process.env.PILOT_STATE_ROOT = await tempStateRoot();

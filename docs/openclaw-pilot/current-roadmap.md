@@ -1,13 +1,39 @@
 # OpenClaw Pilot Current Roadmap
 
-Status: v0.3.0 command-mode planning implementation
+Status: v0.4.1 provider-backed planning correction
 Owner: Geumbi / Moonhwi Lee
 
 ## Current Release
 
-- Current shipped release: v0.2.12
-- Current target: v0.3.0
-- Release theme: command-mode planning for natural user commands
+- Current shipped release: v0.4.0
+- Current target: v0.4.1
+- Release theme: complete the v0.4.0 planning-runtime document goal by adding
+  provider-backed planning and durable exact-bound interview context.
+
+## v0.4.1 Correction Scope
+
+v0.4.0 shipped the shared user-facing presenter and `PlannerProvider` boundary,
+but it still used local deterministic derivation for the visible plan. v0.4.1
+closes that document-goal gap:
+
+- Provider-backed planning receives raw request, command mode, source/run
+  context envelope, mechanical anchor, current internal plan, execution plan,
+  and prior interview turns.
+- `PILOT_PLANNER_PROVIDER=orchestrator` selects the OpenClaw/orchestrator
+  provider path. `PILOT_PLANNER_PROVIDER_COMMAND` can provide a local command
+  adapter; otherwise Pilot calls `openclaw agent --local --json` with a
+  planning-only contract.
+- Provider output is presentation-facing only: drafts or bounded interview
+  questions. It never approves, executes, collects evidence, or replaces the
+  typed execution plan.
+- Provider failure is fail-closed with `*_planner_unavailable`; Pilot must not
+  silently fall back to a polished local fake plan when provider mode is
+  selected.
+- `answer <Run> <clarification>` persists exact-bound interview turns and
+  forwards them to the provider. `answer recent/latest` remains rejected, and
+  same-chat/sender checks remain enforced where source metadata exists.
+- Execution authority remains the typed `execution-plan.json` canonical hash
+  plus explicit approval.
 
 ## v0.2.11 Scope
 

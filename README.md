@@ -60,6 +60,8 @@ Current scope:
 - `pilot route --enabled|--disabled "<exact command>"` tests exact command routing without invoking any legacy backend.
 - `pilot live --enabled=/plan,/verify "<exact command>"` applies per-command live enablement and renders Telegram-safe text.
 - `approve <Run>` resolves a plan/run handle and, for supported approved goals, can continue into execution.
+- Natural planning can use a provider-backed planner when `PILOT_PLANNER_PROVIDER=orchestrator`. The planner receives the raw request, command mode, source/run context envelope, and prior interview turns, then returns presentation-only drafts or interview questions. It never becomes execution authority.
+- `answer <Run> <clarification>` persists exact-bound interview turns and forwards them to the planner provider. `answer recent/latest` remains rejected.
 - Approved implementation/code/fix/test-like goals can use the minimal `run_codex_session` runner when `PILOT_SESSION_RUNNER_ENABLED=true`.
 - Approved goal execution writes `post-execution-evidence.json` and automatically runs deterministic `/verify` against produced artifacts and typed receipts.
 - If automatic post-execution verification returns fixable findings, approved goal execution can write `post-execution-conv-request.json`, run bounded local `/conv`, write `post-convergence-evidence.json`, and re-run deterministic `/verify`.
@@ -73,6 +75,7 @@ Current scope:
 - Approval artifacts use `approved-execution-request.json`, mechanically derived from the hash-validated `execution-plan.json`. Pilot does not execute from request prose, inferred keywords, or legacy `approved-goal-request.json` artifacts.
 - Shared lineage artifacts: each run appends `lineage.jsonl` in its artifact directory and `index/lineage.jsonl` in the state root so `/plan`, `/verify`, `/conv`, `/goal`, approval, and recovery records can be recovered with one common model.
 - By default the session runner is disabled. When enabled, it executes only the configured runner command under the approved plan and captures stdout/stderr/result artifacts.
+- By default the local deterministic planner is used. When `PILOT_PLANNER_PROVIDER=orchestrator`, Pilot uses `PILOT_PLANNER_PROVIDER_COMMAND` when set, or `openclaw agent --local --json` otherwise. Provider failure returns planner-unavailable output instead of a polished local fake plan.
 - Never sends external messages or owns Gateway lifecycle. Out-of-plan work must stop and be reported.
 - The route/live commands are local adapters. `runGatewayBridge()` is an importable bridge for Gateway wiring, but the package does not restart or modify OpenClaw Gateway.
 - Deterministic code checks schema, artifact existence, references, and explicit scope flags. It does not judge semantic quality by regex or hidden context.
@@ -148,3 +151,19 @@ PILOT_SESSION_RUNNER_COMMAND=codex \
 PILOT_SESSION_RUNNER_ARGS_JSON='["exec","--ask-for-approval","never","--sandbox","workspace-write","-"]' \
 npm run pilot -- artifact goal-request path/to/approved-runner-goal.json
 ```
+
+Enable provider-backed planning explicitly:
+
+```bash
+PILOT_PLANNER_PROVIDER=orchestrator \
+PILOT_PLANNER_PROVIDER_TIMEOUT_MS=60000 \
+npm run pilot -- live --enabled=/goal "/goal Draft a context-aware implementation plan"
+```
+
+Set `PILOT_PLANNER_PROVIDER_COMMAND` to a local command that reads the planner
+request JSON on stdin and returns `{"kind":"draft" ...}`,
+`{"kind":"interview" ...}`, or `{"kind":"unavailable" ...}`. Without that env,
+Pilot calls the local OpenClaw `main` agent session `agent:main:pilot-planner`
+with a planning-only JSON contract. Override those with
+`PILOT_PLANNER_OPENCLAW_AGENT` and `PILOT_PLANNER_OPENCLAW_SESSION_KEY` when
+needed.

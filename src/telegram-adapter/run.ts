@@ -124,7 +124,15 @@ async function recordRouteHandoff(route: RouteResult, metadata: Record<string, s
     route.user_report.status !== "plan_created" &&
     route.user_report.status !== "goal_plan_created" &&
     route.user_report.status !== "verify_plan_created" &&
-    route.user_report.status !== "conv_plan_created"
+    route.user_report.status !== "conv_plan_created" &&
+    route.user_report.status !== "plan_needs_clarification" &&
+    route.user_report.status !== "goal_needs_clarification" &&
+    route.user_report.status !== "verify_needs_clarification" &&
+    route.user_report.status !== "conv_needs_clarification" &&
+    route.user_report.status !== "plan_planner_unavailable" &&
+    route.user_report.status !== "goal_planner_unavailable" &&
+    route.user_report.status !== "verify_planner_unavailable" &&
+    route.user_report.status !== "conv_planner_unavailable"
   ) {
     return;
   }
