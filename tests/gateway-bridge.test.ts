@@ -51,12 +51,14 @@ test("Gateway bridge routes enabled plan through the Telegram adapter", async ()
     });
 
     assert.equal(result.live_routing_enabled, true);
-    assert.deepEqual(result.enabled_commands, ["/plan", "approve"]);
+    assert.deepEqual(result.enabled_commands, ["/plan", "approve", "answer"]);
     assert.equal(result.status, "routed");
     assert.equal(result.route?.command, "/plan");
     assert.match(result.telegram_text, /Status: plan_created/);
     assert.match(result.telegram_text, /Run: \d{6}/);
-    assert.match(result.telegram_text, /Next: Review the plan. To continue, reply "approve /);
+    assert.match(result.telegram_text, /Planning Draft/);
+    assert.match(result.telegram_text, /Next: Review the planning draft/);
+    assert.doesNotMatch(result.telegram_text, /Approval\n/);
     assert.ok(result.duration_ms >= 0);
 
     const shortRunId = String(result.route?.result_summary?.short_run_id || "");
@@ -79,7 +81,7 @@ test("Gateway bridge routes enabled plan through the Telegram adapter", async ()
     });
 
     assert.equal(approval.status, "routed");
-    assert.deepEqual(approval.enabled_commands, ["/plan", "approve"]);
+    assert.deepEqual(approval.enabled_commands, ["/plan", "approve", "answer"]);
     assert.equal(approval.route?.command, "approve");
     assert.equal(approval.route?.result_summary?.approved_plan_run_id, result.route?.result_summary?.run_id);
     assert.equal(approval.route?.result_summary?.status, "completed");
@@ -105,7 +107,7 @@ test("Gateway bridge routes enabled plan through the Telegram adapter", async ()
     });
 
     assert.equal(goal.status, "routed");
-    assert.deepEqual(goal.enabled_commands, ["/plan", "/goal", "approve"]);
+    assert.deepEqual(goal.enabled_commands, ["/plan", "/goal", "approve", "answer"]);
     assert.equal(goal.route?.command, "/goal");
     assert.equal(goal.route?.result_summary?.approval_reference, result.route?.result_summary?.run_id);
     assert.match(goal.telegram_text, /Status: completed/);
@@ -142,7 +144,7 @@ test("Gateway bridge routes enabled recovery commands", async () => {
 
     assert.equal(plan.status, "routed");
     assert.equal(plan.route?.command, "/plan");
-    assert.deepEqual(plan.enabled_commands, ["/plan", "list", "status", "resume", "cancel", "approve"]);
+    assert.deepEqual(plan.enabled_commands, ["/plan", "list", "status", "resume", "cancel", "approve", "answer"]);
 
     const shortRunId = String(plan.route?.result_summary?.short_run_id || "");
     assert.match(shortRunId, /^\d{6}$/);

@@ -36,13 +36,14 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.match(result.telegram_text, /Status: plan_created/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /Plan/);
-    assert.match(result.telegram_text, /Outcome:/);
-    assert.match(result.telegram_text, /Approval/);
-    assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
-    assert.match(result.telegram_text, /Capabilities: create_artifact/);
-    assert.match(result.telegram_text, /Next: Review the plan. To continue, reply "approve /);
-    assert.ok(result.telegram_text.indexOf("Plan") < result.telegram_text.indexOf("Approval"));
-    assert.ok(result.telegram_text.indexOf("Approval") < result.telegram_text.indexOf("Evidence"));
+    assert.match(result.telegram_text, /Planning Draft/);
+    assert.match(result.telegram_text, /Understood request/);
+    assert.doesNotMatch(result.telegram_text, /Approval\n/);
+    assert.doesNotMatch(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
+    assert.doesNotMatch(result.telegram_text, /Capabilities: create_artifact/);
+    assert.match(result.telegram_text, /Next: Review the planning draft/);
+    assert.ok(result.telegram_text.indexOf("Planning Draft") < result.telegram_text.indexOf("Remaining"));
+    assert.doesNotMatch(result.telegram_text, /Evidence\n- none/);
     assert.ok(result.telegram_text.length < 4000);
     assert.deepEqual(result.command_result?.metadata, {
       channel: "telegram",
@@ -171,13 +172,14 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     assert.equal(result.route?.user_report.status, "goal_plan_created");
     assert.ok(Array.isArray(result.route?.result_summary?.plan_preview));
     assert.match(result.telegram_text, /Status: goal_plan_created/);
-    assert.match(result.telegram_text, /Phase\/slice plan:/);
+    assert.match(result.telegram_text, /Goal Plan/);
+    assert.match(result.telegram_text, /Understood request/);
     assert.match(result.telegram_text, /Approval/);
     assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
-    assert.match(result.telegram_text, /Goal milestones: \d+ phases, \d+ slices/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /approve \d{6}/);
-    assert.match(result.telegram_text, /Evidence\n- none/);
+    assert.doesNotMatch(result.telegram_text, /Phase\/slice plan:/);
+    assert.doesNotMatch(result.telegram_text, /Evidence\n- none/);
 
     const indexText = await readFile(join(process.env.PILOT_STATE_ROOT || "", "index", "runs.jsonl"), "utf8");
     const indexEntry = JSON.parse(indexText.trim());

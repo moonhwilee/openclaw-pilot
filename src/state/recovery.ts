@@ -38,6 +38,7 @@ function isRouteCommand(value: unknown): value is RouteCommand {
     value === "/conv" ||
     value === "/goal" ||
     value === "approve" ||
+    value === "answer" ||
     value === "list" ||
     value === "status" ||
     value === "resume" ||

@@ -18,6 +18,7 @@ import {
 } from "../goal/post-execution.ts";
 import { runGoal } from "../goal/run.ts";
 import { runPlan } from "../plan/run.ts";
+import { createDefaultPlannerProvider } from "../planning-runtime/provider.ts";
 import {
   progressLinesForGoal,
   progressLinesForRecovery,
@@ -58,6 +59,7 @@ import type {
   RouteResult,
   RouteStatus,
   RouteUserReport,
+  UserFacingPlanDraft,
   VerificationFinding,
   VerificationResult,
 } from "../types.ts";
@@ -68,7 +70,7 @@ export type RunRouteOptions = {
   metadata?: Record<string, unknown>;
 };
 
-const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "list", "status", "resume", "cancel"]);
+const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "answer", "list", "status", "resume", "cancel"]);
 
 function userReport(
   status: string,
@@ -77,12 +79,14 @@ function userReport(
   nextAction: string,
   approvalPreview?: string[],
   progress?: string[],
+  planDraft?: UserFacingPlanDraft,
 ): RouteUserReport {
   const uniqueEvidencePointers = [...new Set(evidencePointers)];
   const uniqueRemainingRisks = [...new Set(remainingRisks)];
   return {
     status,
     ...(progress?.length ? { progress: [...new Set(progress)] } : {}),
+    ...(planDraft ? { plan_draft: planDraft } : {}),
     ...(approvalPreview?.length ? { approval_preview: [...new Set(approvalPreview)] } : {}),
     evidence_pointers: uniqueEvidencePointers,
     remaining_risks: uniqueRemainingRisks.length > 0 ? uniqueRemainingRisks : ["none"],
@@ -92,19 +96,9 @@ function userReport(
 
 function executionPlanApprovalPreview(plan: ExecutionPlan | undefined, shortId: string, runId: string): string[] {
   if (!plan) return [];
-  const capabilities = [...new Set(plan.steps.map((step) => step.capability))].join(", ");
-  const riskClasses = [...new Set(plan.steps.map((step) => step.risk_class))].join(", ");
-  const expectedArtifacts = [...new Set(plan.steps.flatMap((step) => step.expected_artifacts))].slice(0, 5).join(", ");
-  const milestoneCount = plan.goal_milestones?.length || 0;
-  const sliceCount = plan.goal_milestones?.reduce((count, milestone) => count + milestone.slice_ids.length, 0) || 0;
   return [
-    `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
-    `Steps: ${plan.steps.length}`,
-    ...(milestoneCount > 0 ? [`Goal milestones: ${milestoneCount} phases, ${sliceCount} slices`] : []),
-    `Capabilities: ${capabilities || "none"}`,
-    `Risk: ${riskClasses || "none"}`,
-    `Expected artifacts: ${expectedArtifacts || "none"}`,
     `Command: approve ${shortId}`,
+    `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
     `Full run_id: ${runId}`,
   ];
 }
@@ -128,6 +122,14 @@ async function readPlanApprovalPreview(artifactDir: string, shortId: string, run
     return executionPlanApprovalPreview(await readExecutionPlan(join(artifactDir, executionPlanArtifactName)), shortId, runId);
   } catch {
     return [];
+  }
+}
+
+async function readPlanExecutionPlan(artifactDir: string): Promise<ExecutionPlan | undefined> {
+  try {
+    return await readExecutionPlan(join(artifactDir, executionPlanArtifactName));
+  } catch {
+    return undefined;
   }
 }
 
@@ -303,7 +305,7 @@ function recoveryStatusRisks(run: PilotRecoveryRunStatus): string[] {
   return ["none"];
 }
 
-function recoveryCandidateLine(command: "status" | "resume" | "cancel", run: PilotRecoveryRunSummary): string {
+function recoveryCandidateLine(command: "status" | "resume" | "cancel" | "answer", run: PilotRecoveryRunSummary): string {
   return [
     `short=${run.short_run_id}`,
     `status=${run.status}`,
@@ -315,7 +317,7 @@ function recoveryCandidateLine(command: "status" | "resume" | "cancel", run: Pil
 }
 
 function ambiguousRecoveryReport(
-  command: "status" | "resume" | "cancel",
+  command: "status" | "resume" | "cancel" | "answer",
   reportStatus: string,
   reference: string,
   matches: PilotRecoveryRunSummary[],
@@ -372,6 +374,14 @@ function commandForPlanMode(mode: PlanMode): "/plan" | "/goal" | "/verify" | "/c
   return "/plan";
 }
 
+function planModeForCommand(command: RouteResult["command"]): PlanMode | undefined {
+  if (command === "/goal") return "goal";
+  if (command === "/verify") return "verify";
+  if (command === "/conv") return "conv";
+  if (command === "/plan") return "plan";
+  return undefined;
+}
+
 function planModeCompletedRisks(mode: PlanMode): string[] {
   if (mode === "verify") {
     return [
@@ -403,9 +413,24 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
   const command = commandForPlanMode(mode);
   const result = await runPlan({ request: raw, mode, anchor });
   const shortId = shortRunId(result.run_id);
+  const executionPlan = result.status === "completed_plan" ? await readPlanExecutionPlan(result.artifact_dir) : undefined;
   const approvalPreview =
-    result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
+    result.status === "completed_plan" && mode !== "plan" ? executionPlanApprovalPreview(executionPlan, shortId, result.run_id) : [];
+  const plannerResult = createDefaultPlannerProvider().draft({
+    mode,
+    request: raw,
+    plan: result.plan,
+    anchor,
+    executionPlan,
+  });
+  const planDraft = plannerResult.draft;
   const visibleStatus = result.status === "completed_plan" ? planModeCreatedStatus(mode) : planModeNeedsClarificationStatus(mode);
+  const nextAction =
+    result.status === "needs_user_decision"
+      ? `Reply "answer ${shortId} <clarification>" to continue this exact planning interview, or rerun ${command} with a sharper request.`
+      : mode === "plan"
+        ? "Review the planning draft. Use /goal, /verify, or /conv when this should become an approval-backed execution workflow."
+        : `Review the ${planModeLabel(mode)}. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`;
   return {
     schema_version: "pilot.route.v0",
     status: result.status === "completed_plan" ? (mode === "plan" ? "routed" : "awaiting_approval") : "needs_user_decision",
@@ -423,6 +448,7 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
       anchor,
       created_files: result.created_files,
       plan_preview: planPreview(result.plan),
+      plan_draft: planDraft,
       profile_expectations: profileExpectationSummary(result.goal.profile),
     },
     user_report: userReport(
@@ -431,11 +457,10 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
       result.status === "needs_user_decision"
         ? result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
         : planModeCompletedRisks(mode),
-      result.status === "needs_user_decision"
-        ? `Answer the ambiguity questions and rerun ${command}.`
-        : `Review the ${planModeLabel(mode)}. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`,
+      nextAction,
       approvalPreview,
-      planModeProgress(mode, anchor),
+      [],
+      planDraft,
     ),
   };
 }
@@ -648,6 +673,16 @@ async function readGoalRunIfExists(artifactDir: string): Promise<GoalRunResult |
   try {
     const parsed = JSON.parse(await readFile(join(artifactDir, "goal-run.json"), "utf8")) as GoalRunResult;
     return parsed.schema_version === "pilot.goal_run.v0" ? parsed : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function readPlanGoalArtifact(artifactDir: string): Promise<GoalArtifact | undefined> {
+  try {
+    const parsed = JSON.parse(await readFile(join(artifactDir, "goal.json"), "utf8")) as GoalArtifact;
+    return parsed.schema_version === "pilot.goal.v0" ? parsed : undefined;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
@@ -1301,6 +1336,128 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   const parsed = parseRouteInput(options.input);
 
   if (!options.enabled) return unavailable(parsed.command);
+
+  if (parsed.command === "answer") {
+    const [reference, ...answerParts] = parsed.rest.split(/\s+/);
+    const answer = answerParts.join(" ").trim();
+    if (!reference || !answer) {
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: { status: "interview_answer_needs_exact_run" },
+        user_report: userReport(
+          "interview_answer_needs_exact_run",
+          [],
+          ["An interview answer must name the exact plan run it belongs to."],
+          "Reply answer <Run> <your clarification>. Do not use recent/latest for interview answers.",
+        ),
+      };
+    }
+    if (/^(recent|latest|최근|마지막)$/i.test(reference)) {
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: { status: "interview_answer_recent_rejected", reference },
+        user_report: userReport(
+          "interview_answer_recent_rejected",
+          [],
+          ["Interview answers are exact-bound and cannot attach to recent/latest implicitly."],
+          "Reply answer <Run> <your clarification> with the short or full run id from the question.",
+        ),
+      };
+    }
+
+    const resolution = await resolveRecoveryRun(defaultStateRoot(), reference);
+    if (resolution.status === "not_found") {
+      return targetNeedsRunReport("answer", "interview_answer_run_not_found", reference, "Run list to find the exact plan run, then retry answer <Run> <clarification>.");
+    }
+    if (resolution.status === "ambiguous") {
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: {
+          status: "interview_answer_run_ambiguous",
+          reference: resolution.reference,
+          matches: resolution.matches,
+        },
+        user_report: ambiguousRecoveryReport("answer", "interview_answer_run_ambiguous", resolution.reference, resolution.matches),
+      };
+    }
+
+    const parent = resolution.run;
+    const incomingChatId = metadataString(options.metadata, "chat_id");
+    const incomingSenderId = metadataString(options.metadata, "sender_id");
+    if (
+      (parent.source?.chat_id && incomingChatId && parent.source.chat_id !== incomingChatId) ||
+      (parent.source?.sender_id && incomingSenderId && parent.source.sender_id !== incomingSenderId)
+    ) {
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: { status: "interview_answer_source_mismatch", reference: parent.run_id },
+        user_report: userReport(
+          "interview_answer_source_mismatch",
+          [],
+          ["The answer came from a different chat or sender than the original interview run."],
+          "Answer from the original chat/sender, or start a new planning request.",
+        ),
+      };
+    }
+    const mode = planModeForCommand(parent.command);
+    const goal = await readPlanGoalArtifact(parent.artifact_dir);
+    if (!mode || !goal || goal.status !== "needs_user_decision") {
+      return {
+        schema_version: "pilot.route.v0",
+        status: "needs_user_decision",
+        command: parsed.command,
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: { status: "interview_answer_not_expected", reference: parent.run_id, run: parent },
+        user_report: userReport(
+          "interview_answer_not_expected",
+          [],
+          ["The referenced run is not waiting for planning clarification."],
+          "Use status <Run> to inspect the current next action, or start a new /goal, /verify, /conv, or /plan request.",
+        ),
+      };
+    }
+
+    const answerPath = join(parent.artifact_dir, `interview-answer-${Date.now()}.json`);
+    await writeJson(answerPath, {
+      schema_version: "pilot.interview_answer.v0",
+      parent_run_id: parent.run_id,
+      parent_short_run_id: parent.short_run_id,
+      command: parent.command,
+      answer,
+      created_at: new Date().toISOString(),
+    });
+    const continued = await commandModePlanRoute(mode, `${goal.request}\n\nClarification answer: ${answer}`, {
+      kind: "run",
+      reference: parent.run_id,
+      short_reference: parent.short_run_id,
+      artifact_dir: parent.artifact_dir,
+    });
+    continued.command = parsed.command;
+    continued.result_summary = {
+      ...(continued.result_summary || {}),
+      status: continued.user_report.status,
+      parent_interview_run_id: parent.run_id,
+      parent_interview_answer_path: answerPath,
+    };
+    return continued;
+  }
 
   if (parsed.command === "list") {
     const limitText = parsed.rest.match(/\d+/)?.[0];

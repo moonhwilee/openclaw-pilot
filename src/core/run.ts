@@ -1,5 +1,5 @@
 import { runRoute } from "../route/run.ts";
-import type { RouteResult, RouteStatus } from "../types.ts";
+import type { RouteResult, RouteStatus, UserFacingPlanDraft } from "../types.ts";
 
 export type PilotCommandName = RouteResult["command"];
 
@@ -30,6 +30,7 @@ const exactCommands: PilotCommandName[] = [
   "/conv",
   "/goal",
   "approve",
+  "answer",
   "list",
   "status",
   "resume",
@@ -57,11 +58,50 @@ function stringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function isPlanningStatus(status: string): boolean {
+  return (
+    status === "plan_created" ||
+    status === "goal_plan_created" ||
+    status === "verify_plan_created" ||
+    status === "conv_plan_created" ||
+    status === "plan_needs_clarification" ||
+    status === "goal_needs_clarification" ||
+    status === "verify_needs_clarification" ||
+    status === "conv_needs_clarification"
+  );
+}
+
+function formatDraftSection(draft: UserFacingPlanDraft): string[] {
+  return [
+    "",
+    draft.title,
+    "- Understood request:",
+    `  ${draft.understood_request}`,
+    "",
+    "Assumptions",
+    ...bulletLines(draft.assumptions),
+    "",
+    "Plan",
+    ...bulletLines(draft.steps),
+    "",
+    "Verification",
+    ...bulletLines(draft.verification),
+    "",
+    "Approval Boundary",
+    ...bulletLines(draft.approval_boundary),
+    "",
+    "Not Doing Yet",
+    ...bulletLines(draft.not_doing_yet),
+    ...(draft.open_questions?.length ? ["", "Questions", ...bulletLines(draft.open_questions)] : []),
+  ];
+}
+
 function formatRouteReply(route: RouteResult): string {
   const report = route.user_report;
   const usage = typeof route.result_summary?.usage === "string" ? route.result_summary.usage : undefined;
   const example = typeof route.result_summary?.example === "string" ? route.result_summary.example : undefined;
-  const planPreview = stringList(route.result_summary?.plan_preview);
+  const planningStatus = isPlanningStatus(report.status);
+  const planPreview = planningStatus ? [] : stringList(route.result_summary?.plan_preview);
   const progress = stringList(report.progress);
   const runId = typeof route.result_summary?.run_id === "string" ? route.result_summary.run_id : undefined;
   const shortRunId =
@@ -92,11 +132,10 @@ function formatRouteReply(route: RouteResult): string {
     ...(runId ? [`Run: ${shortRunId || runId}`, ...(shortRunId ? [`Run ID: ${runId}`] : [])] : []),
     ...(progress.length ? ["", "Progress", ...bulletLines(progress)] : []),
     ...(usage ? ["", "Usage", `- ${usage}`, ...(example ? ["", "Example", `- ${example}`] : [])] : []),
+    ...(report.plan_draft ? formatDraftSection(report.plan_draft) : []),
     ...(planPreview.length ? ["", "Plan", ...bulletLines(planPreview)] : []),
     ...(report.approval_preview?.length ? ["", "Approval", ...bulletLines(report.approval_preview)] : []),
-    "",
-    "Evidence",
-    ...bulletLines(report.evidence_pointers),
+    ...(planningStatus ? [] : ["", "Evidence", ...bulletLines(report.evidence_pointers)]),
     "",
     "Remaining",
     ...bulletLines(report.remaining_risks),
@@ -167,7 +206,16 @@ export async function runPilotCommand(request: PilotCommandRequest): Promise<Pil
   const typedCommand = command as PilotCommandName;
   const enabled =
     request.enabledCommands?.includes(typedCommand) ||
-    (typedCommand === "approve" && (request.enabledCommands?.includes("/plan") || request.enabledCommands?.includes("/goal"))) ||
+    (typedCommand === "approve" &&
+      (request.enabledCommands?.includes("/plan") ||
+        request.enabledCommands?.includes("/goal") ||
+        request.enabledCommands?.includes("/verify") ||
+        request.enabledCommands?.includes("/conv"))) ||
+    (typedCommand === "answer" &&
+      (request.enabledCommands?.includes("/plan") ||
+        request.enabledCommands?.includes("/goal") ||
+        request.enabledCommands?.includes("/verify") ||
+        request.enabledCommands?.includes("/conv"))) ||
     ((typedCommand === "list" ||
       typedCommand === "status" ||
       typedCommand === "resume" ||

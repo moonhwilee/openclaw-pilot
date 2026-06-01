@@ -35,6 +35,7 @@ const exactCommands = new Set<RouteResult["command"]>([
   "/conv",
   "/goal",
   "approve",
+  "answer",
   "list",
   "status",
   "resume",
@@ -57,8 +58,18 @@ function enabledCommandsForGate(gate: GatewayBridgeGate = {}): RouteResult["comm
   if (!gate.liveRoutingEnabled) return [];
   const configured = gate.enabledCommands || ["/plan"];
   const enabled = configured.filter((command): command is RouteResult["command"] => exactCommands.has(command));
-  if (enabled.includes("/plan") && !enabled.includes("approve")) enabled.push("approve");
-  if (enabled.includes("/goal") && !enabled.includes("approve")) enabled.push("approve");
+  if (
+    (enabled.includes("/plan") || enabled.includes("/goal") || enabled.includes("/verify") || enabled.includes("/conv")) &&
+    !enabled.includes("approve")
+  ) {
+    enabled.push("approve");
+  }
+  if (
+    (enabled.includes("/plan") || enabled.includes("/goal") || enabled.includes("/verify") || enabled.includes("/conv")) &&
+    !enabled.includes("answer")
+  ) {
+    enabled.push("answer");
+  }
   return enabled;
 }
 

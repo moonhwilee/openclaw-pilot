@@ -73,7 +73,7 @@ function metadataString(metadata, key) {
     return value || undefined;
 }
 async function recordRouteHandoff(route, metadata) {
-    if (route.command !== "/plan" && route.command !== "/goal" && route.command !== "/verify")
+    if (route.command !== "/plan" && route.command !== "/goal" && route.command !== "/verify" && route.command !== "/conv")
         return;
     const summary = route.result_summary || {};
     const runId = typeof summary.run_id === "string" ? summary.run_id : undefined;
@@ -83,7 +83,8 @@ async function recordRouteHandoff(route, metadata) {
         return;
     if (route.user_report.status !== "plan_created" &&
         route.user_report.status !== "goal_plan_created" &&
-        route.user_report.status !== "verify_plan_created") {
+        route.user_report.status !== "verify_plan_created" &&
+        route.user_report.status !== "conv_plan_created") {
         return;
     }
     const entry = {

@@ -36,9 +36,11 @@ test("live adapter formats enabled plan route as Telegram-safe text", async () =
   assert.equal(output.route.status, "routed");
   assert.equal(output.route.command, "/plan");
   assert.match(output.telegram_text, /Pilot/);
-  assert.match(output.telegram_text, /Evidence/);
+  assert.match(output.telegram_text, /Planning Draft/);
   assert.match(output.telegram_text, /Run: \d{6}/);
-  assert.match(output.telegram_text, /Next: Review the plan. To continue, reply "approve /);
+  assert.match(output.telegram_text, /Next: Review the planning draft/);
+  assert.doesNotMatch(output.telegram_text, /Approval\n/);
+  assert.doesNotMatch(output.telegram_text, /Evidence\n- none/);
   assert.ok(output.telegram_text.length < 4000);
 });
 
@@ -96,8 +98,8 @@ test("live adapter turns broad implementation verify into an approval-backed pla
   assert.equal(output.route.command, "/verify");
   assert.ok(output.telegram_text.length < 4000);
   assert.match(output.telegram_text, /Status: verify_plan_created/);
-  assert.match(output.telegram_text, /Mode: verification plan/);
-  assert.match(output.telegram_text, /Router: command mode plus mechanical target only/);
+  assert.match(output.telegram_text, /Verification Plan/);
+  assert.doesNotMatch(output.telegram_text, /Router: command mode plus mechanical target only/);
   assert.match(output.telegram_text, /Next: Review the verification plan/);
   assert.doesNotMatch(output.telegram_text, /Provide a concrete run id/);
 

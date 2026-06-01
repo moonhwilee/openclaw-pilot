@@ -114,7 +114,7 @@ function metadataString(metadata: Record<string, string>, key: string): string |
 }
 
 async function recordRouteHandoff(route: RouteResult, metadata: Record<string, string>): Promise<void> {
-  if (route.command !== "/plan" && route.command !== "/goal" && route.command !== "/verify") return;
+  if (route.command !== "/plan" && route.command !== "/goal" && route.command !== "/verify" && route.command !== "/conv") return;
   const summary = route.result_summary || {};
   const runId = typeof summary.run_id === "string" ? summary.run_id : undefined;
   const artifactDir = typeof summary.artifact_dir === "string" ? summary.artifact_dir : undefined;
@@ -123,7 +123,8 @@ async function recordRouteHandoff(route: RouteResult, metadata: Record<string, s
   if (
     route.user_report.status !== "plan_created" &&
     route.user_report.status !== "goal_plan_created" &&
-    route.user_report.status !== "verify_plan_created"
+    route.user_report.status !== "verify_plan_created" &&
+    route.user_report.status !== "conv_plan_created"
   ) {
     return;
   }

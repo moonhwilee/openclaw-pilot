@@ -10,6 +10,7 @@ function isRouteCommand(value) {
         value === "/conv" ||
         value === "/goal" ||
         value === "approve" ||
+        value === "answer" ||
         value === "list" ||
         value === "status" ||
         value === "resume" ||
