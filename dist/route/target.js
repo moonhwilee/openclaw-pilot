@@ -9,7 +9,7 @@ function firstToken(value) {
 export function looksLikeRunReference(value) {
     return /^\d{6}$/.test(value) || /^\d{8}T\d{6}Z-[a-z0-9가-힣-]+$/.test(value);
 }
-function looksLikeJsonPath(value) {
+export function looksLikeJsonPath(value) {
     const trimmed = value.trim();
     return /^[^\s]+\.json$/i.test(trimmed);
 }
@@ -22,15 +22,18 @@ async function pathExists(path) {
         return false;
     }
 }
-export async function resolveCommandTarget(raw) {
+export async function resolveArtifactCommandTarget(raw) {
+    const rest = raw.trim();
+    return (await pathExists(rest))
+        ? { kind: "json_path_existing", raw: rest, path: rest }
+        : { kind: "json_path_missing", raw: rest, path: rest };
+}
+export async function resolveUserCommandTarget(raw) {
     const rest = raw.trim();
     if (!rest)
         return { kind: "empty", raw: rest };
-    if (looksLikeJsonPath(rest)) {
-        return (await pathExists(rest))
-            ? { kind: "json_path_existing", raw: rest, path: rest }
-            : { kind: "json_path_missing", raw: rest, path: rest };
-    }
+    if (looksLikeJsonPath(rest))
+        return { kind: "artifact_like_disabled", raw: rest, path: rest };
     const token = firstToken(rest);
     if (looksLikeRunReference(token))
         return { kind: "run_reference", raw: rest, reference: token };

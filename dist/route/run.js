@@ -7,13 +7,13 @@ import { executionPlanArtifactName, executionPlanCapabilities, executionPlanRisk
 import { buildPostConvergenceEvidencePacket, buildPostExecutionConvRequest, buildPostExecutionEvidencePacket, fixableVerificationVerdict, } from "../goal/post-execution.js";
 import { runGoal } from "../goal/run.js";
 import { runPlan } from "../plan/run.js";
-import { progressLinesForConv, progressLinesForGoal, progressLinesForRecovery, progressLinesForVerification, } from "../progress.js";
+import { progressLinesForConv, progressLinesForGoal, progressLinesForRecovery, } from "../progress.js";
 import { profileExpectationSummary } from "../profiles/index.js";
 import { resolveApprovalEntry } from "../state/approval-index.js";
 import { cancelRecoveryRun, createResumeDirective, isRecoveryRunCancelled, listRecoveryRuns, resolveRecoveryRun, } from "../state/recovery.js";
 import { shortRunId } from "../state/run-index.js";
 import { defaultStateRoot } from "../config.js";
-import { latestRecoveryRun, looksLikeRunReference as looksLikeTargetRunReference, resolveCommandTarget, writeConvRequestFromVerification, writeEvidencePacketForRun, } from "./target.js";
+import { latestRecoveryRun, looksLikeJsonPath, looksLikeRunReference as looksLikeTargetRunReference, resolveUserCommandTarget, writeConvRequestFromVerification, } from "./target.js";
 import { runVerify } from "../verify/run.js";
 const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "list", "status", "resume", "cancel"]);
 function userReport(status, evidencePointers, remainingRisks, nextAction, approvalPreview, progress) {
@@ -117,13 +117,13 @@ const commandUsage = {
         usage: "/verify <what to verify>",
         example: "/verify 최근 goal 결과가 충분히 검증됐는지 봐줘",
         missing: "Missing verification target.",
-        next: "Send /verify followed by a natural-language claim, a recent/latest alias, a run id, or an advanced evidence packet JSON path.",
+        next: "Send /verify followed by a natural-language claim, a recent/latest alias, or a run id.",
     },
     "/conv": {
         usage: "/conv <what to converge>",
         example: "/conv 최근 검증에서 나온 P2 문제 수렴해줘",
         missing: "Missing convergence target.",
-        next: "Send /conv followed by a natural-language finding, a recent/latest alias, a run id, or an advanced conv request JSON path.",
+        next: "Send /conv followed by a natural-language finding, a recent/latest alias, or a run id.",
     },
 };
 function usageRoute(command) {
@@ -248,10 +248,12 @@ function targetNeedsRunReport(command, status, target, nextAction) {
         user_report: userReport(status, [], [target], nextAction),
     };
 }
-function missingJsonPathReport(command, path) {
-    const naturalExample = command === "/verify"
-        ? "/verify 최근 goal 결과가 충분히 검증됐는지 봐줘"
-        : "/conv 최근 검증에서 나온 P2 문제 수렴해줘";
+function artifactShortcutDisabledReport(command, path) {
+    const artifactCommand = command === "/verify"
+        ? "pilot artifact verify <evidence-packet.json>"
+        : command === "/conv"
+            ? "pilot artifact conv <conv-request.json>"
+            : "pilot artifact goal-request <goal-request.json>";
     return {
         schema_version: "pilot.route.v0",
         status: "needs_user_decision",
@@ -259,13 +261,14 @@ function missingJsonPathReport(command, path) {
         enabled: true,
         backend: "openclaw-pilot",
         result_summary: {
-            status: "advanced_artifact_path_missing",
+            status: "artifact_shortcut_disabled",
             path,
+            artifact_command: artifactCommand,
         },
-        user_report: userReport("advanced_artifact_path_missing", [], [
-            "Advanced JSON artifact path was not found.",
-            "Normal users can send a natural-language target instead of creating JSON manually.",
-        ], `Retry with natural language, for example: ${naturalExample}`),
+        user_report: userReport("artifact_shortcut_disabled", [], [
+            "User-facing Pilot commands no longer execute JSON artifact shortcuts.",
+            "JSON artifact checks are maintainer/internal operations.",
+        ], `Use natural language here, or run ${artifactCommand} from the local maintainer CLI.`),
     };
 }
 async function newestRunReference(stateRoot) {
@@ -273,7 +276,7 @@ async function newestRunReference(stateRoot) {
 }
 async function recoveryReferenceFromRest(command, rest) {
     const stateRoot = defaultStateRoot();
-    const target = await resolveCommandTarget(rest);
+    const target = await resolveUserCommandTarget(rest);
     if (target.kind === "recent_alias") {
         const latest = await newestRunReference(stateRoot);
         if (!latest) {
@@ -282,7 +285,8 @@ async function recoveryReferenceFromRest(command, rest) {
                 route: targetNeedsRunReport(command, `recovery_${command}_no_recent_run`, target.raw, "Run /plan or /goal first, then retry with recent/latest or a concrete run id."),
             };
         }
-        if (command === "cancel") {
+        if (command === "cancel" || command === "resume") {
+            const status = command === "cancel" ? "recovery_cancel_recent_requires_confirmation" : "recovery_resume_recent_requires_confirmation";
             return {
                 status: "needs_user_decision",
                 route: {
@@ -292,11 +296,15 @@ async function recoveryReferenceFromRest(command, rest) {
                     enabled: true,
                     backend: "openclaw-pilot",
                     result_summary: {
-                        status: "recovery_cancel_recent_requires_confirmation",
+                        status,
                         reference: target.raw,
                         run: latest,
                     },
-                    user_report: userReport("recovery_cancel_recent_requires_confirmation", [recoveryCandidateLine("cancel", latest)], ["Cancel is destructive for an in-flight run, so recent/latest aliases are not cancelled silently."], `Confirm the exact target by replying cancel ${latest.run_id}.`),
+                    user_report: userReport(status, [recoveryCandidateLine(command, latest)], [
+                        command === "cancel"
+                            ? "Cancel is destructive for an in-flight run, so recent/latest aliases are not cancelled silently."
+                            : "Resume can create resume artifacts and auto-run checkpoints, so recent/latest aliases are not resumed silently.",
+                    ], `Confirm the exact target by replying ${command} ${latest.run_id}.`),
                 },
             };
         }
@@ -308,18 +316,23 @@ async function recoveryReferenceFromRest(command, rest) {
 }
 async function resolveRunTarget(command, raw) {
     const stateRoot = defaultStateRoot();
-    const target = await resolveCommandTarget(raw);
+    const target = await resolveUserCommandTarget(raw);
     if (target.kind === "empty")
         return { status: "needs_user_decision", route: usageRoute(command) };
-    if (target.kind === "json_path_existing")
-        return { status: "json_path", path: target.path };
-    if (target.kind === "json_path_missing")
-        return { status: "needs_user_decision", route: missingJsonPathReport(command, target.path) };
+    if (target.kind === "artifact_like_disabled") {
+        return { status: "needs_user_decision", route: artifactShortcutDisabledReport(command, target.path) };
+    }
+    if (target.kind === "natural_language") {
+        return {
+            status: "needs_user_decision",
+            route: targetNeedsRunReport(command, command === "/verify" ? "verify_needs_evidence" : "conv_needs_anchor_or_plan", target.raw, command === "/verify"
+                ? "Provide a concrete run id/recent alias plus evidence scope, or run a focused /goal plan to collect review evidence first."
+                : "Provide a concrete run id/recent alias with verification findings, or create a /goal plan for the requested convergence work."),
+        };
+    }
     const reference = target.kind === "run_reference"
         ? target.reference
-        : target.kind === "recent_alias"
-            ? (await newestRunReference(stateRoot))?.run_id
-            : (await newestRunReference(stateRoot))?.run_id;
+        : (await newestRunReference(stateRoot))?.run_id;
     if (!reference) {
         return {
             status: "needs_user_decision",
@@ -1182,7 +1195,7 @@ export async function runRoute(options) {
     if (parsed.command === "approve") {
         if (!parsed.rest)
             throw new Error("route approve requires a run reference");
-        const approvalTarget = await resolveCommandTarget(parsed.rest);
+        const approvalTarget = await resolveUserCommandTarget(parsed.rest);
         if (approvalTarget.kind === "recent_alias") {
             const latest = await newestRunReference(defaultStateRoot());
             return {
@@ -1311,33 +1324,22 @@ export async function runRoute(options) {
         const target = await resolveRunTarget(parsed.command, parsed.rest);
         if (target.status === "needs_user_decision")
             return target.route;
-        const packetPath = target.status === "json_path"
-            ? target.path
-            : await writeEvidencePacketForRun(target.run, `Verify Pilot run ${target.run.short_run_id}: ${target.natural_request}`);
-        if (!packetPath) {
-            return targetNeedsRunReport(parsed.command, "verify_needs_evidence", target.status === "run" ? target.natural_request : parsed.rest, "The target run has no readable artifacts yet. Run status <Run> or provide a concrete evidence source before retrying /verify.");
-        }
-        const result = await runVerify({ packetPath });
-        const evidencePointers = [packetPath, ...result.created_files];
         return {
             schema_version: "pilot.route.v0",
-            status: result.verdict === "blocked" ? "blocked" : "routed",
+            status: "needs_user_decision",
             command: parsed.command,
             enabled: true,
             backend: "openclaw-pilot",
             result_summary: {
-                verdict: result.verdict,
-                semantic_verdict: result.semantic_verdict,
-                reviewer_summary: result.reviewer_summary,
-                run_id: result.run_id,
-                evidence_packet_path: packetPath,
-                artifact_dir: result.artifact_dir,
-                created_files: result.created_files,
-                profile_expectations: profileExpectationSummary(result.packet.claim.profile),
+                status: "verify_needs_evidence",
+                target_run_id: target.run.run_id,
+                target_short_run_id: target.run.short_run_id,
+                target_artifact_dir: target.run.artifact_dir,
             },
-            user_report: userReport(result.semantic_verdict !== "not_requested" ? `semantic_${result.semantic_verdict}` : result.verdict, evidencePointers, findingRisks(result.findings), result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
-                ? "Use the verification artifact as the evidence pointer for the next step."
-                : "Revise the evidence packet or run /conv against the listed findings.", undefined, progressLinesForVerification(result)),
+            user_report: userReport("verify_needs_evidence", [...target.run.available_artifacts, ...target.run.evidence_pointers], [
+                "User-facing /verify now means content review, not mechanical artifact existence checks.",
+                "This route will not silently convert a run into a deterministic-only pass.",
+            ], "Collect or cite the exact evidence scope for content review, or use pilot artifact verify <evidence-packet.json> for maintainer-only mechanical checks.", undefined, [`Run: ${target.run.short_run_id}`, "Verify: content review evidence required"]),
         };
     }
     if (parsed.command === "/conv") {
@@ -1345,24 +1347,19 @@ export async function runRoute(options) {
         if (target.status === "needs_user_decision")
             return target.route;
         let requestPath;
-        if (target.status === "json_path") {
-            requestPath = target.path;
+        let verification = await readVerificationResultIfExists(target.run.artifact_dir);
+        if (!verification) {
+            const goalRun = await readGoalRunIfExists(target.run.artifact_dir);
+            if (goalRun?.post_execution_verification?.artifact_dir) {
+                verification = await readVerificationResultIfExists(goalRun.post_execution_verification.artifact_dir);
+            }
         }
-        else {
-            let verification = await readVerificationResultIfExists(target.run.artifact_dir);
-            if (!verification) {
-                const goalRun = await readGoalRunIfExists(target.run.artifact_dir);
-                if (goalRun?.post_execution_verification?.artifact_dir) {
-                    verification = await readVerificationResultIfExists(goalRun.post_execution_verification.artifact_dir);
-                }
-            }
-            if (!verification) {
-                return targetNeedsRunReport(parsed.command, "conv_needs_verification_anchor", target.natural_request, "Run /verify first or provide a run that has verification findings before retrying /conv.");
-            }
-            requestPath = await writeConvRequestFromVerification(target.run, verification, target.natural_request);
-            if (!requestPath) {
-                return targetNeedsRunReport(parsed.command, "conv_needs_actionable_findings", target.natural_request, "The target verification has no actionable findings to converge. Use status <Run> or create a narrower /goal if new work is needed.");
-            }
+        if (!verification) {
+            return targetNeedsRunReport(parsed.command, "conv_needs_verification_anchor", target.natural_request, "Provide a run that already has verification findings, or create a /goal plan to gather the missing review evidence first.");
+        }
+        requestPath = await writeConvRequestFromVerification(target.run, verification, target.natural_request);
+        if (!requestPath) {
+            return targetNeedsRunReport(parsed.command, "conv_needs_actionable_findings", target.natural_request, "The target verification has no actionable findings to converge. Use status <Run> or create a narrower /goal if new work is needed.");
         }
         const result = await runConv({ requestPath });
         const evidencePointers = [requestPath, ...result.created_files];
@@ -1387,6 +1384,9 @@ export async function runRoute(options) {
     }
     if (!parsed.rest)
         return usageRoute(parsed.command);
+    if (looksLikeJsonPath(parsed.rest)) {
+        return artifactShortcutDisabledReport(parsed.command, parsed.rest);
+    }
     let requestPath = parsed.rest;
     let approvalReference;
     if (looksLikeRunReference(parsed.rest)) {

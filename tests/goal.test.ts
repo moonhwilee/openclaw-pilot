@@ -492,20 +492,19 @@ test("vague pilot goal remains in plan semantics", async () => {
 });
 
 test("pilot goal approved fixture can be run from the repository", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "goal", "fixtures/document_strategy/goal-request-approved.json"], {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "goal-request", "fixtures/document_strategy/goal-request-approved.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.result_summary.status, "completed");
-  assert.equal(output.result_summary.steps, 1);
+  assert.equal(output.status, "completed");
+  assert.equal(output.steps.length, 1);
 });
 
 test("pilot goal draft fixture waits for approval from the repository", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "goal", "fixtures/document_strategy/goal-request-draft.json"], {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "goal-request", "fixtures/document_strategy/goal-request-draft.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
@@ -513,6 +512,5 @@ test("pilot goal draft fixture waits for approval from the repository", () => {
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.status, "awaiting_approval");
-  assert.equal(output.result_summary.status, "awaiting_approval");
-  assert.equal(output.result_summary.steps, 0);
+  assert.equal(output.steps.length, 0);
 });

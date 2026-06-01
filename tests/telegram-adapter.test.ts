@@ -318,7 +318,7 @@ test("Telegram adapter denies unauthorized chats without exposing internals", as
   assert.doesNotMatch(result.telegram_text, /stack|Error:|src\//);
 });
 
-test("Telegram adapter can trust OpenClaw sender metadata for direct chats", async () => {
+test("Telegram adapter blocks trusted direct JSON artifact shortcuts safely", async () => {
   const result = await runTelegramAdapter({
     message: {
       text: "/verify fixtures/document_strategy/evidence-packet.json",
@@ -334,6 +334,7 @@ test("Telegram adapter can trust OpenClaw sender metadata for direct chats", asy
   });
 
   assert.equal(result.authorized, true);
-  assert.equal(result.command_result?.status, "routed");
+  assert.equal(result.command_result?.status, "needs_user_decision");
   assert.equal(result.route?.command, "/verify");
+  assert.equal(result.route?.user_report.status, "artifact_shortcut_disabled");
 });

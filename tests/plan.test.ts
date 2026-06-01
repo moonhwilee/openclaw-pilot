@@ -204,14 +204,14 @@ test("execution plan milestones must not reuse lifecycle phase names", () => {
   assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
 });
 
-test("CLI goal mode requires a natural objective or advanced request path", () => {
+test("CLI goal mode requires a natural objective or approved run reference", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "goal"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires a natural-language objective or advanced goal request JSON path/);
+  assert.match(result.stderr, /requires a natural-language objective or approved run reference/);
 });
 
 test("CLI smoke creates a local plan artifact", async () => {

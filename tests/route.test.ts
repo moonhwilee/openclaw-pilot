@@ -214,7 +214,7 @@ test("status recent aliases resolve the newest Pilot run", async () => {
   }
 });
 
-test("approval and cancel recent aliases require explicit target confirmation", async () => {
+test("approval, resume, and cancel recent aliases require explicit target confirmation", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -225,6 +225,12 @@ test("approval and cancel recent aliases require explicit target confirmation", 
     assert.equal(approve.status, "needs_user_decision");
     assert.equal(approve.user_report.status, "approval_recent_requires_explicit_target");
     assert.match(approve.user_report.next_action, new RegExp(`approve ${plan.run_id}`));
+
+    const resume = await runRoute({ input: "resume recent", enabled: true });
+    assert.equal(resume.status, "needs_user_decision");
+    assert.equal(resume.user_report.status, "recovery_resume_recent_requires_confirmation");
+    assert.match(resume.user_report.next_action, new RegExp(`resume ${plan.run_id}`));
+    assert.equal(resume.result_summary?.resume_artifact, undefined);
 
     const cancel = await runRoute({ input: "cancel recent", enabled: true });
     assert.equal(cancel.status, "needs_user_decision");
@@ -239,7 +245,7 @@ test("approval and cancel recent aliases require explicit target confirmation", 
   }
 });
 
-test("/verify natural language target builds an internal evidence packet instead of treating prose as a path", async () => {
+test("/verify recent target requires content-review evidence instead of deterministic-only pass", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -248,11 +254,11 @@ test("/verify natural language target builds an internal evidence packet instead
 
     const verify = await runRoute({ input: "/verify 최근 plan 결과가 충분히 남았는지 검증해줘", enabled: true });
 
-    assert.equal(verify.status, "routed");
+    assert.equal(verify.status, "needs_user_decision");
     assert.equal(verify.command, "/verify");
-    assert.notEqual(verify.user_report.status, "advanced_artifact_path_missing");
-    assert.ok(verify.user_report.evidence_pointers.some((path) => path.endsWith("natural-verify-evidence-packet.json")));
-    assert.ok(verify.user_report.evidence_pointers.some((path) => path.endsWith("verification.json")));
+    assert.equal(verify.user_report.status, "verify_needs_evidence");
+    assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|natural-verify-evidence-packet\.json/);
+    assert.ok(verify.user_report.remaining_risks.some((risk) => risk.includes("content review")));
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -262,7 +268,32 @@ test("/verify natural language target builds an internal evidence packet instead
   }
 });
 
-test("/verify missing JSON path returns natural-language-first guidance", async () => {
+test("broad natural /verify does not silently bind to the newest run", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    await runPlan({ request: "Draft a broad verify regression plan." });
+
+    const verify = await runRoute({
+      input: "/verify 0.2.8 0.2.9 0.2.10 구현 관점에서 놓친 부분과 오버엔지니어링 검토해줘",
+      enabled: true,
+    });
+
+    assert.equal(verify.status, "needs_user_decision");
+    assert.equal(verify.user_report.status, "verify_needs_evidence");
+    assert.deepEqual(verify.user_report.evidence_pointers, []);
+    assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|Findings: none|natural-verify-evidence-packet/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/verify JSON path is disabled on user-facing routes", async () => {
   const stateRoot = await tempStateRoot();
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -270,9 +301,8 @@ test("/verify missing JSON path returns natural-language-first guidance", async 
     const verify = await runRoute({ input: "/verify artifacts/pilot/not-found-evidence-packet.json", enabled: true });
 
     assert.equal(verify.status, "needs_user_decision");
-    assert.equal(verify.user_report.status, "advanced_artifact_path_missing");
-    assert.ok(verify.user_report.remaining_risks.some((risk) => risk.includes("Normal users can send a natural-language target")));
-    assert.match(verify.user_report.next_action, /\/verify 최근/);
+    assert.equal(verify.user_report.status, "artifact_shortcut_disabled");
+    assert.match(verify.user_report.next_action, /pilot artifact verify/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -334,7 +364,45 @@ test("/conv natural language target builds an internal conv request from recent 
   }
 });
 
-test("/conv missing JSON path returns natural-language-first guidance", async () => {
+test("broad natural /conv does not silently bind to the newest verification finding", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const packetPath = join(stateRoot, "broad-conv-evidence-packet.json");
+    await writeFile(
+      packetPath,
+      `${JSON.stringify(
+        {
+          schema_version: "pilot.evidence.v0",
+          claim: { id: "broad-conv", statement: "Broad conv should not auto-anchor.", profile: "document_strategy" },
+          verdict_criteria: [{ id: "evidence-present", description: "Evidence exists.", required: true }],
+          evidence: [],
+          reviewer_boundary: { semantic_review_required: false, deterministic_checks_only: true },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    await runVerify({ packetPath, stateRoot });
+
+    const conv = await runRoute({ input: "/conv 네 제안을 오버엔지니어링 없이 수렴해줘", enabled: true });
+
+    assert.equal(conv.status, "needs_user_decision");
+    assert.equal(conv.user_report.status, "conv_needs_anchor_or_plan");
+    assert.deepEqual(conv.user_report.evidence_pointers, []);
+    assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/conv JSON path is disabled on user-facing routes", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -342,9 +410,8 @@ test("/conv missing JSON path returns natural-language-first guidance", async ()
     const conv = await runRoute({ input: "/conv artifacts/pilot/not-found-conv-request.json", enabled: true });
 
     assert.equal(conv.status, "needs_user_decision");
-    assert.equal(conv.user_report.status, "advanced_artifact_path_missing");
-    assert.ok(conv.user_report.remaining_risks.some((risk) => risk.includes("Normal users can send a natural-language target")));
-    assert.match(conv.user_report.next_action, /\/conv 최근/);
+    assert.equal(conv.user_report.status, "artifact_shortcut_disabled");
+    assert.match(conv.user_report.next_action, /pilot artifact conv/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -928,10 +995,10 @@ test("resume auto-runs standalone conv from a conv checkpoint", async () => {
   }
 });
 
-test("/verify exact route smoke evaluates document fixture", () => {
+test("artifact verify CLI smoke evaluates document fixture", () => {
   const result = spawnSync(
     process.execPath,
-    ["src/cli.ts", "route", "--enabled", "/verify fixtures/document_strategy/evidence-packet.json"],
+    ["src/cli.ts", "artifact", "verify", "fixtures/document_strategy/evidence-packet.json"],
     {
       cwd: new URL("..", import.meta.url),
       encoding: "utf8",
@@ -940,10 +1007,8 @@ test("/verify exact route smoke evaluates document fixture", () => {
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.command, "/verify");
-  assert.equal(output.result_summary.verdict, "sufficient_evidence");
-  assert.match(output.user_report.next_action, /verification artifact/);
+  assert.equal(output.verdict, "sufficient_evidence");
+  assert.equal(output.semantic_verdict, "pass");
 });
 
 test("approve route resolves, records, and executes a scoped receipt run", async () => {
@@ -1266,34 +1331,29 @@ test("approve route executes freeform local file creation goals through the sess
   }
 });
 
-test("/conv exact route smoke runs anchored conv fixture", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "route", "--enabled", "/conv fixtures/document_strategy/conv-request.json"], {
+test("artifact conv CLI smoke runs anchored conv fixture", () => {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "conv", "fixtures/document_strategy/conv-request.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.command, "/conv");
-  assert.equal(output.result_summary.status, "completed");
-  assert.match(output.user_report.next_action, /Run \/verify/);
+  assert.equal(output.status, "completed");
+  assert.equal(output.rounds.length, 1);
 });
 
-test("/goal exact route smoke runs approved scoped goal fixture", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "route", "--enabled", "/goal fixtures/document_strategy/goal-request-approved.json"], {
+test("artifact goal-request CLI smoke runs approved scoped goal fixture", () => {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "goal-request", "fixtures/document_strategy/goal-request-approved.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.command, "/goal");
-  assert.equal(output.result_summary.status, "completed");
-  assert.equal(output.user_report.status, "completed_verified");
-  assert.equal(output.result_summary.lifecycle.user_status, "completed_verified");
-  assert.ok(output.user_report.evidence_pointers.some((path: string) => path.endsWith("receipts.jsonl")));
+  assert.equal(output.status, "completed");
+  assert.equal(output.lifecycle.user_status, "completed_verified");
+  assert.ok(output.created_files.some((path: string) => path.endsWith("receipts.jsonl")));
 });
 
 test("/goal freeform route creates a goal-intake plan without execution", async () => {
@@ -1372,7 +1432,7 @@ test("/goal vague freeform route asks for clarification without handoff executio
   }
 });
 
-test("/goal exact route preserves awaiting approval status for draft goal fixture", () => {
+test("/goal user route blocks draft goal fixture JSON shortcuts", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "route", "--enabled", "/goal fixtures/document_strategy/goal-request-draft.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
@@ -1380,10 +1440,10 @@ test("/goal exact route preserves awaiting approval status for draft goal fixtur
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "awaiting_approval");
+  assert.equal(output.status, "needs_user_decision");
   assert.equal(output.command, "/goal");
-  assert.equal(output.result_summary.status, "awaiting_approval");
-  assert.match(output.user_report.next_action, /Approve the concrete plan/);
+  assert.equal(output.user_report.status, "artifact_shortcut_disabled");
+  assert.match(output.user_report.next_action, /pilot artifact goal-request/);
 });
 
 test("research profile fixture passes without changing core lifecycle", async () => {

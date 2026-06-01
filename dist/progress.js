@@ -32,13 +32,18 @@ function goalMilestoneLine(result) {
     return `Goal phase: ${active.phase_index}/${milestones.length} ${active.goal_phase} (${active.status}, ${sliceCount} slices)`;
 }
 export function progressLinesForVerification(result) {
+    const findingCounts = priorityCountsFromVerification(result.findings);
     return compact([
         `Run: ${shortRunId(result.run_id)}`,
         `Verify: ${result.semantic_verdict === "not_requested" ? result.verdict : `${result.semantic_verdict}/${result.verdict}`}`,
         result.reviewer_summary.required
-            ? `Reviewers: semantic ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required} (${result.reviewer_summary.status})`
-            : "Reviewers: semantic not requested",
-        priorityCountsFromVerification(result.findings) ? `Findings: ${priorityCountsFromVerification(result.findings)}` : "Findings: none",
+            ? `Reviewers: content review ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required} (${result.reviewer_summary.status})`
+            : "Reviewers: content review not requested",
+        findingCounts
+            ? `Findings: ${findingCounts}`
+            : result.reviewer_summary.required
+                ? "Findings: no actionable findings"
+                : "Findings: content review not performed",
     ]);
 }
 export function progressLinesForConv(result, checkpoint) {
@@ -77,7 +82,7 @@ export function progressLinesForGoal(result) {
             ? `Conv: ${result.post_execution_convergence.rounds} rounds (${result.post_execution_convergence.status})`
             : "",
         result.post_convergence_verification ? `Reverify: ${result.post_convergence_verification.verdict}` : "",
-        findingCounts ? `Findings: ${findingCounts}` : "Findings: none",
+        findingCounts ? `Findings: ${findingCounts}` : "Findings: no actionable findings",
     ]);
 }
 export function progressLinesForRecovery(run, artifacts = {}) {

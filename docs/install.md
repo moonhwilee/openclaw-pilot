@@ -10,7 +10,7 @@ Current workspace roadmap and TODO live at
 Install from the current GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.10
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.11
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -59,13 +59,13 @@ pilot verify "최근 goal 결과가 충분히 검증됐는지 봐줘"
 pilot conv "최근 검증에서 나온 P2 문제 수렴해줘"
 ```
 
-JSON paths are still supported as advanced artifact shortcuts for maintainers,
-fixtures, and tests:
+JSON artifact execution is maintainer-only. Use the artifact namespace for
+fixtures, typed requests, and mechanical checks:
 
 ```bash
-pilot goal fixtures/document_strategy/goal-request-draft.json
-pilot verify fixtures/document_strategy/evidence-packet.json
-pilot conv fixtures/document_strategy/conv-request.json
+pilot artifact goal-request fixtures/document_strategy/goal-request-draft.json
+pilot artifact verify fixtures/document_strategy/evidence-packet.json
+pilot artifact conv fixtures/document_strategy/conv-request.json
 ```
 
 Recovery commands inspect that shared state and handle safe cancellation:
@@ -87,6 +87,8 @@ available artifacts. `pilot resume <Run>` writes `resume.json`, computes the
 latest safe phase checkpoint, and can auto-resume approved runner-backed work
 from `execute`, missing post-execution `verify`, fixable `converge`, missing
 post-convergence `reverify`, or standalone `/conv` from `conv-checkpoint.json`.
+Because resume can create artifacts and run checkpoints, `resume recent/latest`
+requires an exact run id confirmation.
 Auto-resume
 creates `resume-lock.json` before execution and records the attempt in
 `auto-resume-attempt.json` so repeated resume calls do not duplicate work. It
@@ -96,12 +98,14 @@ appends a cancellation lineage record, and blocks later `approve` or `/goal
 <Run>` continuation for that run.
 
 Standalone natural `/conv` writes an internal `conv-request.json` and
-`conv-checkpoint.json`, so an interrupted convergence run can continue from the
-next round. Standalone natural `/verify` writes an internal evidence packet
-before running verification. Direct JSON paths remain safely rerunnable as
-advanced artifact shortcuts; the `pilot.verify_checkpoint.v0` contract is
-reserved for future long verification that needs criteria/evidence-level
-resume.
+`conv-checkpoint.json` only when a concrete run or recent alias provides a clear
+verification anchor. Broad prose asks for an anchor or a goal plan instead.
+Standalone user-facing `/verify` means content review; when evidence scope is
+insufficient it returns `verify_needs_evidence` instead of presenting a
+mechanical artifact check as implementation approval. Mechanical JSON checks
+remain rerunnable through `pilot artifact verify`; the
+`pilot.verify_checkpoint.v0` contract is reserved for future long verification
+that needs criteria/evidence-level resume.
 
 Non-terminal, non-cancelled runs are considered stale after 30 minutes by
 default. Set `PILOT_RECOVERY_STALE_AFTER_MS` to tune that window for local

@@ -69,7 +69,7 @@ test("core API returns safe unsupported result without legacy fallback", async (
   assert.match(result.recovery_hint || "", /\/plan, \/verify, \/conv, \/goal/);
 });
 
-test("core API returns safe natural-first guidance for missing advanced JSON paths", async () => {
+test("core API blocks JSON artifact shortcuts on user-facing routes", async () => {
   const result = await runPilotCommand({
     input: "/verify /tmp/pilot-core-missing-evidence-packet.json",
     enabledCommands: ["/verify"],
@@ -79,9 +79,9 @@ test("core API returns safe natural-first guidance for missing advanced JSON pat
   assert.equal(result.enabled, true);
   assert.equal(result.command, "/verify");
   assert.equal(result.route?.status, "needs_user_decision");
-  assert.equal(result.route?.result_summary?.status, "advanced_artifact_path_missing");
-  assert.match(result.reply_text, /Status: advanced_artifact_path_missing/);
-  assert.match(result.reply_text, /natural-language target/);
+  assert.equal(result.route?.result_summary?.status, "artifact_shortcut_disabled");
+  assert.match(result.reply_text, /Status: artifact_shortcut_disabled/);
+  assert.match(result.reply_text, /pilot artifact verify/);
   assert.doesNotMatch(result.reply_text, /ENOENT/);
   assert.doesNotMatch(result.reply_text, /\/tmp\//);
 });

@@ -229,16 +229,15 @@ test("pilot conv rejects forbidden or unsupported capabilities", async () => {
 });
 
 test("pilot conv fixture can be run from the repository", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "conv", "fixtures/document_strategy/conv-request.json"], {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "conv", "fixtures/document_strategy/conv-request.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.result_summary.status, "completed");
-  assert.equal(output.result_summary.rounds, 1);
+  assert.equal(output.status, "completed");
+  assert.equal(output.rounds.length, 1);
 });
 
 test("verify-fail to conv to verify fixture stays bounded", async () => {

@@ -231,7 +231,7 @@ test("Phase 2 CLI verify smoke evaluates a packet", async () => {
   await writeFile(artifactPath, "# Plan\n", "utf8");
   const packetPath = await writePacket(root, basePacket(artifactPath));
 
-  const result = spawnSync(process.execPath, ["src/cli.ts", "verify", packetPath], {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "verify", packetPath], {
     cwd: new URL("..", import.meta.url),
     env: { ...process.env, PILOT_STATE_ROOT: stateRoot },
     encoding: "utf8",
@@ -239,31 +239,29 @@ test("Phase 2 CLI verify smoke evaluates a packet", async () => {
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.result_summary.verdict, "sufficient_evidence");
-  assert.equal(output.result_summary.semantic_verdict, "pass");
-  assert.equal(await fileExists(join(output.result_summary.artifact_dir, "verification.json")), true);
+  assert.equal(output.verdict, "sufficient_evidence");
+  assert.equal(output.semantic_verdict, "pass");
+  assert.equal(await fileExists(join(output.artifact_dir, "verification.json")), true);
 });
 
 test("document_strategy fixture can be verified from the repository", () => {
-  const result = spawnSync(process.execPath, ["src/cli.ts", "verify", "fixtures/document_strategy/evidence-packet.json"], {
+  const result = spawnSync(process.execPath, ["src/cli.ts", "artifact", "verify", "fixtures/document_strategy/evidence-packet.json"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.result_summary.verdict, "sufficient_evidence");
-  assert.equal(output.result_summary.semantic_verdict, "pass");
+  assert.equal(output.verdict, "sufficient_evidence");
+  assert.equal(output.semantic_verdict, "pass");
 });
 
-test("goal command requires a natural objective or advanced request path", () => {
+test("goal command requires a natural objective or approved run reference", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "goal"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires a natural-language objective or advanced goal request JSON path/);
+  assert.match(result.stderr, /requires a natural-language objective or approved run reference/);
 });
