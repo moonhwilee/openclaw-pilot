@@ -110,6 +110,36 @@ Non-terminal, non-cancelled runs are considered stale after 30 minutes by
 default. Set `PILOT_RECOVERY_STALE_AFTER_MS` to tune that window for local
 tests or operational smoke checks.
 
+## Planner Provider
+
+Natural `/plan`, `/goal`, `/verify`, and `/conv` requests can use a
+provider-backed planner. The provider receives the raw request, command mode,
+mechanical anchor, source/run context envelope, and exact-bound prior interview
+turns. Its output is presentation-facing only: execution still requires the
+typed `execution-plan.json` canonical hash and explicit approval.
+
+```bash
+PILOT_PLANNER_PROVIDER=orchestrator
+PILOT_PLANNER_PROVIDER_TIMEOUT_MS=60000
+```
+
+When `PILOT_PLANNER_PROVIDER_COMMAND` is set, Pilot runs that command, writes
+the planner request JSON to stdin, and expects JSON on stdout:
+
+```json
+{"kind":"draft","draft":{...}}
+{"kind":"interview","questions":["..."],"summary":"...","draft":{...}}
+{"kind":"unavailable","reason":"..."}
+```
+
+When no command is configured, Pilot calls the local OpenClaw `main` agent
+session `agent:main:pilot-planner` with a planning-only prompt. Override the
+agent or session key with `PILOT_PLANNER_OPENCLAW_AGENT` and
+`PILOT_PLANNER_OPENCLAW_SESSION_KEY` when needed. Provider failure is
+fail-closed: Pilot reports `*_planner_unavailable` or clarification instead of
+silently falling back to a polished local plan. The deterministic local planner
+remains the default for dev/test environments where no provider is selected.
+
 ## Session Runner
 
 Approved implementation/code/fix/test-like goals can use the minimal

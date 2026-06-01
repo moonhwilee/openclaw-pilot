@@ -13,10 +13,43 @@ import { appendApprovalEntry } from "../src/state/approval-index.ts";
 import { appendLineageRecord } from "../src/state/lineage.ts";
 import { appendRunIndexEntry, shortRunId } from "../src/state/run-index.ts";
 import { runVerify } from "../src/verify/run.ts";
-import type { ConvCheckpoint, ConvRequest, GoalRequest, GoalRunResult } from "../src/types.ts";
+import type { ConvCheckpoint, ConvRequest, GoalRequest, GoalRunResult, UserFacingPlanDraft } from "../src/types.ts";
+import type { PlannerProvider, PlannerProviderInput, PlannerProviderResult } from "../src/planning-runtime/provider.ts";
 
 async function tempStateRoot(): Promise<string> {
   return mkdtemp(join(tmpdir(), "pilot-state-"));
+}
+
+function providerDraft(input: PlannerProviderInput, suffix = "orchestrated"): UserFacingPlanDraft {
+  return {
+    title: "Orchestrated Goal Plan",
+    mode: input.mode,
+    understood_request: `${suffix}: ${input.request}`,
+    assumptions: [
+      `source chat=${input.source?.chat_id || "missing"}`,
+      `prior turns=${input.priorInterviewTurns?.length || 0}`,
+    ],
+    approach: ["Use the provider-backed planner output instead of the local derived draft."],
+    steps: ["Provider step one", "Provider step two"],
+    verification: ["Verify provider handoff captured raw request and context envelope."],
+    approval_boundary: ["Execution still requires the typed execution-plan hash and explicit approval."],
+    not_doing_yet: ["No execution has been performed by the planner provider."],
+  };
+}
+
+class CapturingPlannerProvider implements PlannerProvider {
+  readonly kind = "test" as const;
+  calls: PlannerProviderInput[] = [];
+  private readonly responder: (input: PlannerProviderInput) => PlannerProviderResult;
+
+  constructor(response: (input: PlannerProviderInput) => PlannerProviderResult) {
+    this.responder = response;
+  }
+
+  draft(input: PlannerProviderInput): PlannerProviderResult {
+    this.calls.push(input);
+    return this.responder(input);
+  }
 }
 
 async function convergenceGoalRequest(root: string, id: string): Promise<string> {
@@ -1492,6 +1525,153 @@ test("/goal vague freeform route asks for clarification without handoff executio
   }
 });
 
+test("provider-backed planning receives raw request and context envelope and renders provider draft", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  const provider = new CapturingPlannerProvider((input) => ({
+    status: "draft_ready",
+    provider_kind: "test",
+    draft: providerDraft(input),
+  }));
+  try {
+    const output = await runRoute({
+      input: "/goal Implement the orchestrator planning provider acceptance gate.",
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23954", update_id: "23954" },
+      plannerProvider: provider,
+    });
+
+    assert.equal(output.status, "awaiting_approval");
+    assert.equal(output.user_report.status, "goal_plan_created");
+    assert.equal(output.result_summary?.planner_provider, "test");
+    assert.equal(provider.calls.length, 1);
+    assert.equal(provider.calls[0]?.request, "Implement the orchestrator planning provider acceptance gate.");
+    assert.equal(provider.calls[0]?.mode, "goal");
+    assert.equal(provider.calls[0]?.source?.chat_id, "343580315");
+    assert.equal(provider.calls[0]?.source?.sender_id, "343580315");
+    assert.equal(provider.calls[0]?.source?.source_message_id, "23954");
+    assert.equal(provider.calls[0]?.runContext.short_run_id, output.result_summary?.short_run_id);
+    assert.equal(provider.calls[0]?.priorInterviewTurns?.length, 0);
+    assert.match(output.user_report.plan_draft?.understood_request || "", /^orchestrated:/);
+    assert.ok(output.user_report.plan_draft?.steps.includes("Provider step one"));
+    assert.doesNotMatch(JSON.stringify(output.user_report), /CommonPlanContract|Router:|Command mode|Phase\/slice plan|Evidence: none/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("provider-selected mode fails closed when planner is unavailable", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  const provider = new CapturingPlannerProvider(() => ({
+    status: "unavailable",
+    provider_kind: "test",
+    reason: "orchestrator transport unavailable",
+  }));
+  try {
+    const output = await runRoute({
+      input: "/goal Implement provider unavailable handling.",
+      enabled: true,
+      plannerProvider: provider,
+    });
+
+    assert.equal(output.status, "needs_user_decision");
+    assert.equal(output.user_report.status, "goal_planner_unavailable");
+    assert.equal(output.result_summary?.planner_provider, "test");
+    assert.equal(output.result_summary?.planner_unavailable_reason, "orchestrator transport unavailable");
+    assert.equal(output.user_report.plan_draft, undefined);
+    assert.match(output.user_report.next_action, /planner provider is available/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("orchestrator provider command path is selected by environment", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousProvider = process.env.PILOT_PLANNER_PROVIDER;
+  const previousCommand = process.env.PILOT_PLANNER_PROVIDER_COMMAND;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  process.env.PILOT_PLANNER_PROVIDER = "orchestrator";
+  process.env.PILOT_PLANNER_PROVIDER_COMMAND = "node tests/fixtures/planner-provider-command.mjs";
+  try {
+    const output = await runRoute({
+      input: "/goal Implement the real provider command path.",
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23955" },
+    });
+
+    assert.equal(output.status, "awaiting_approval");
+    assert.equal(output.user_report.status, "goal_plan_created");
+    assert.equal(output.result_summary?.planner_provider, "orchestrator");
+    assert.match(output.user_report.plan_draft?.understood_request || "", /^command-provider:/);
+    assert.ok(output.user_report.plan_draft?.assumptions.includes("chat=343580315"));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousProvider === undefined) {
+      delete process.env.PILOT_PLANNER_PROVIDER;
+    } else {
+      process.env.PILOT_PLANNER_PROVIDER = previousProvider;
+    }
+    if (previousCommand === undefined) {
+      delete process.env.PILOT_PLANNER_PROVIDER_COMMAND;
+    } else {
+      process.env.PILOT_PLANNER_PROVIDER_COMMAND = previousCommand;
+    }
+  }
+});
+
+test("orchestrator provider normalizes compatible draft field names", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const previousProvider = process.env.PILOT_PLANNER_PROVIDER;
+  const previousCommand = process.env.PILOT_PLANNER_PROVIDER_COMMAND;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  process.env.PILOT_PLANNER_PROVIDER = "orchestrator";
+  process.env.PILOT_PLANNER_PROVIDER_COMMAND = "node tests/fixtures/planner-provider-loose-draft-command.mjs";
+  try {
+    const output = await runRoute({
+      input: "/goal Build a compact provider normalization smoke plan.",
+      enabled: true,
+    });
+
+    assert.equal(output.status, "awaiting_approval");
+    assert.equal(output.user_report.status, "goal_plan_created");
+    assert.equal(output.result_summary?.planner_provider, "orchestrator");
+    assert.equal(output.user_report.plan_draft?.mode, "goal");
+    assert.match(output.user_report.plan_draft?.understood_request || "", /^loose-provider:/);
+    assert.ok(output.user_report.plan_draft?.approach.includes("Normalize compatible provider draft fields."));
+    assert.ok(output.user_report.plan_draft?.verification.includes("Rendered draft uses the standard user-facing shape."));
+    assert.ok(output.user_report.plan_draft?.approval_boundary.includes("Execution still requires approval of the typed execution plan."));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+    if (previousProvider === undefined) {
+      delete process.env.PILOT_PLANNER_PROVIDER;
+    } else {
+      process.env.PILOT_PLANNER_PROVIDER = previousProvider;
+    }
+    if (previousCommand === undefined) {
+      delete process.env.PILOT_PLANNER_PROVIDER_COMMAND;
+    } else {
+      process.env.PILOT_PLANNER_PROVIDER_COMMAND = previousCommand;
+    }
+  }
+});
+
 test("exact-bound interview answer continues a clarification run without recent fallback", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   process.env.PILOT_STATE_ROOT = await tempStateRoot();
@@ -1521,6 +1701,60 @@ test("exact-bound interview answer continues a clarification run without recent 
     assert.equal(continued.user_report.plan_draft?.mode, "goal");
     assert.match(continued.user_report.next_action, /approve \d{6}/);
     assert.doesNotMatch(JSON.stringify(continued.user_report), /Router: command mode plus mechanical target only/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("exact-bound interview answer forwards prior turns to provider", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = await tempStateRoot();
+  const provider = new CapturingPlannerProvider((input) => {
+    if ((input.priorInterviewTurns || []).some((turn) => turn.role === "user")) {
+      return {
+        status: "draft_ready",
+        provider_kind: "test",
+        draft: providerDraft(input, "answered"),
+      };
+    }
+    return {
+      status: "needs_clarification",
+      provider_kind: "test",
+      draft: { ...providerDraft(input), open_questions: ["Which concrete artifact should Pilot produce?"] },
+      questions: ["Which concrete artifact should Pilot produce?"],
+      summary: "Need one concrete artifact.",
+    };
+  });
+  try {
+    const clarification = await runRoute({
+      input: "/goal 도와줘",
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "24000" },
+      plannerProvider: provider,
+    });
+    const shortId = String(clarification.result_summary?.short_run_id || "");
+    assert.equal(clarification.user_report.status, "goal_needs_clarification");
+    assert.deepEqual(clarification.result_summary?.planner_questions, ["Which concrete artifact should Pilot produce?"]);
+
+    const continued = await runRoute({
+      input: `answer ${shortId} Create one local planning smoke artifact and verify it exists.`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "24001" },
+      plannerProvider: provider,
+    });
+
+    assert.equal(continued.status, "awaiting_approval");
+    assert.equal(continued.command, "answer");
+    assert.equal(continued.user_report.status, "goal_plan_created");
+    assert.match(continued.user_report.plan_draft?.understood_request || "", /^answered:/);
+    const answerCall = provider.calls.at(-1);
+    assert.ok(answerCall?.priorInterviewTurns?.some((turn) => turn.role === "planner" && turn.content === "Which concrete artifact should Pilot produce?"));
+    assert.ok(answerCall?.priorInterviewTurns?.some((turn) => turn.role === "user" && /local planning smoke artifact/.test(turn.content)));
+    assert.equal(answerCall?.anchor?.reference, clarification.result_summary?.run_id);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;

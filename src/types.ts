@@ -469,6 +469,28 @@ export type UserFacingPlanDraft = {
   open_questions?: string[];
 };
 
+export type PlannerSourceContext = {
+  channel?: string;
+  chat_id?: string;
+  sender_id?: string;
+  source_message_id?: string;
+  source_update_id?: string;
+};
+
+export type PlannerRunContext = {
+  run_id: string;
+  short_run_id: string;
+  artifact_dir: string;
+  parent_run_id?: string;
+  parent_short_run_id?: string;
+};
+
+export type InterviewTurn = {
+  role: "planner" | "user";
+  content: string;
+  created_at: string;
+};
+
 export type PilotRunIndexEntry = {
   schema_version: "pilot.run_index.v0";
   created_at: string;

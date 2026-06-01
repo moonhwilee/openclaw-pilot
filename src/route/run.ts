@@ -18,7 +18,7 @@ import {
 } from "../goal/post-execution.ts";
 import { runGoal } from "../goal/run.ts";
 import { runPlan } from "../plan/run.ts";
-import { createDefaultPlannerProvider } from "../planning-runtime/provider.ts";
+import { createDefaultPlannerProvider, type PlannerProvider } from "../planning-runtime/provider.ts";
 import {
   progressLinesForGoal,
   progressLinesForRecovery,
@@ -52,6 +52,7 @@ import type {
   GoalRequest,
   GoalRunResult,
   GoalRunStatus,
+  InterviewTurn,
   PilotApprovalEntry,
   PilotRecoveryRunSummary,
   PilotRecoveryRunStatus,
@@ -68,6 +69,7 @@ export type RunRouteOptions = {
   input: string;
   enabled: boolean;
   metadata?: Record<string, unknown>;
+  plannerProvider?: PlannerProvider;
 };
 
 const routeCommands = new Set(["/plan", "/verify", "/conv", "/goal", "approve", "answer", "list", "status", "resume", "cancel"]);
@@ -360,6 +362,13 @@ function planModeNeedsClarificationStatus(mode: PlanMode): string {
   return "plan_needs_clarification";
 }
 
+function planModePlannerUnavailableStatus(mode: PlanMode): string {
+  if (mode === "goal") return "goal_planner_unavailable";
+  if (mode === "verify") return "verify_planner_unavailable";
+  if (mode === "conv") return "conv_planner_unavailable";
+  return "plan_planner_unavailable";
+}
+
 function planModeLabel(mode: PlanMode): string {
   if (mode === "goal") return "goal execution plan";
   if (mode === "verify") return "verification plan";
@@ -409,24 +418,131 @@ function planModeProgress(mode: PlanMode, anchor?: CommandPlanAnchor): string[] 
   ];
 }
 
-async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: CommandPlanAnchor): Promise<RouteResult> {
+function plannerSourceFromMetadata(metadata: Record<string, unknown> | undefined) {
+  return {
+    channel: metadataString(metadata, "channel"),
+    chat_id: metadataString(metadata, "chat_id"),
+    sender_id: metadataString(metadata, "sender_id"),
+    source_message_id: metadataString(metadata, "message_id"),
+    source_update_id: metadataString(metadata, "update_id"),
+  };
+}
+
+async function readInterviewTurns(artifactDir: string | undefined): Promise<InterviewTurn[]> {
+  if (!artifactDir) return [];
+  try {
+    const parsed = JSON.parse(await readFile(join(artifactDir, "interview.json"), "utf8")) as { turns?: unknown };
+    if (!Array.isArray(parsed.turns)) return [];
+    return parsed.turns.filter((turn): turn is InterviewTurn => {
+      if (!turn || typeof turn !== "object") return false;
+      const candidate = turn as Partial<InterviewTurn>;
+      return (
+        (candidate.role === "planner" || candidate.role === "user") &&
+        typeof candidate.content === "string" &&
+        typeof candidate.created_at === "string"
+      );
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeInterviewTurns(artifactDir: string, parentRunId: string, turns: InterviewTurn[]): Promise<string> {
+  const path = join(artifactDir, "interview.json");
+  await writeJson(path, {
+    schema_version: "pilot.interview.v0",
+    parent_run_id: parentRunId,
+    turns,
+    updated_at: new Date().toISOString(),
+  });
+  return path;
+}
+
+async function commandModePlanRoute(
+  mode: PlanMode,
+  raw: string,
+  anchor?: CommandPlanAnchor,
+  options: {
+    metadata?: Record<string, unknown>;
+    plannerProvider?: PlannerProvider;
+    priorInterviewTurns?: InterviewTurn[];
+    parentInterviewRunId?: string;
+  } = {},
+): Promise<RouteResult> {
   const command = commandForPlanMode(mode);
   const result = await runPlan({ request: raw, mode, anchor });
   const shortId = shortRunId(result.run_id);
   const executionPlan = result.status === "completed_plan" ? await readPlanExecutionPlan(result.artifact_dir) : undefined;
   const approvalPreview =
     result.status === "completed_plan" && mode !== "plan" ? executionPlanApprovalPreview(executionPlan, shortId, result.run_id) : [];
-  const plannerResult = createDefaultPlannerProvider().draft({
+  const planner = options.plannerProvider || createDefaultPlannerProvider();
+  const runContext = {
+    run_id: result.run_id,
+    short_run_id: shortId,
+    artifact_dir: result.artifact_dir,
+    ...(options.parentInterviewRunId ? { parent_run_id: options.parentInterviewRunId } : {}),
+    ...(anchor?.short_reference ? { parent_short_run_id: anchor.short_reference } : {}),
+  };
+  const plannerResult = await planner.draft({
     mode,
     request: raw,
     plan: result.plan,
     anchor,
     executionPlan,
+    source: plannerSourceFromMetadata(options.metadata),
+    runContext,
+    priorInterviewTurns: options.priorInterviewTurns || [],
   });
+  if (plannerResult.status === "unavailable") {
+    const unavailableStatus = planModePlannerUnavailableStatus(mode);
+    return {
+      schema_version: "pilot.route.v0",
+      status: "needs_user_decision",
+      command,
+      enabled: true,
+      backend: "openclaw-pilot",
+      result_summary: {
+        status: unavailableStatus,
+        plan_status: result.status,
+        plan_mode: mode,
+        planner_provider: plannerResult.provider_kind,
+        planner_unavailable_reason: plannerResult.reason,
+        run_id: result.run_id,
+        short_run_id: shortId,
+        state_root: result.goal.state_root,
+        artifact_dir: result.artifact_dir,
+        anchor,
+        created_files: result.created_files,
+        profile_expectations: profileExpectationSummary(result.goal.profile),
+      },
+      user_report: userReport(
+        unavailableStatus,
+        [],
+        [plannerResult.reason],
+        `Retry after the ${planModeLabel(mode)} planner provider is available, or rerun with a sharper request.`,
+      ),
+    };
+  }
   const planDraft = plannerResult.draft;
-  const visibleStatus = result.status === "completed_plan" ? planModeCreatedStatus(mode) : planModeNeedsClarificationStatus(mode);
+  const providerQuestions = plannerResult.status === "needs_clarification" ? plannerResult.questions : [];
+  const visibleStatus =
+    result.status === "completed_plan" && plannerResult.status === "draft_ready"
+      ? planModeCreatedStatus(mode)
+      : planModeNeedsClarificationStatus(mode);
+  const interviewTurns =
+    plannerResult.status === "needs_clarification" && providerQuestions.length
+      ? [
+          ...(options.priorInterviewTurns || []),
+          ...providerQuestions.map((question) => ({ role: "planner" as const, content: question, created_at: new Date().toISOString() })),
+        ]
+      : options.priorInterviewTurns || [];
+  const interviewPath =
+    plannerResult.status === "needs_clarification" && interviewTurns.length
+      ? await writeInterviewTurns(result.artifact_dir, result.run_id, interviewTurns)
+      : undefined;
   const nextAction =
-    result.status === "needs_user_decision"
+    visibleStatus === planModeNeedsClarificationStatus(mode)
       ? `Reply "answer ${shortId} <clarification>" to continue this exact planning interview, or rerun ${command} with a sharper request.`
       : mode === "plan"
         ? "Review the planning draft. Use /goal, /verify, or /conv when this should become an approval-backed execution workflow."
@@ -447,6 +563,9 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
       artifact_dir: result.artifact_dir,
       anchor,
       created_files: result.created_files,
+      planner_provider: plannerResult.provider_kind,
+      planner_questions: providerQuestions,
+      ...(interviewPath ? { interview_path: interviewPath } : {}),
       plan_preview: planPreview(result.plan),
       plan_draft: planDraft,
       profile_expectations: profileExpectationSummary(result.goal.profile),
@@ -454,8 +573,10 @@ async function commandModePlanRoute(mode: PlanMode, raw: string, anchor?: Comman
     user_report: userReport(
       visibleStatus,
       [],
-      result.status === "needs_user_decision"
-        ? result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
+      visibleStatus === planModeNeedsClarificationStatus(mode)
+        ? providerQuestions.length
+          ? providerQuestions
+          : result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
         : planModeCompletedRisks(mode),
       nextAction,
       approvalPreview,
@@ -1443,11 +1564,19 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
       answer,
       created_at: new Date().toISOString(),
     });
+    const priorInterviewTurns = await readInterviewTurns(parent.artifact_dir);
+    const userTurn: InterviewTurn = { role: "user", content: answer, created_at: new Date().toISOString() };
+    await writeInterviewTurns(parent.artifact_dir, parent.run_id, [...priorInterviewTurns, userTurn]);
     const continued = await commandModePlanRoute(mode, `${goal.request}\n\nClarification answer: ${answer}`, {
       kind: "run",
       reference: parent.run_id,
       short_reference: parent.short_run_id,
       artifact_dir: parent.artifact_dir,
+    }, {
+      metadata: options.metadata,
+      plannerProvider: options.plannerProvider,
+      priorInterviewTurns: [...priorInterviewTurns, userTurn],
+      parentInterviewRunId: parent.run_id,
     });
     continued.command = parsed.command;
     continued.result_summary = {
@@ -1846,19 +1975,19 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
 
   if (parsed.command === "/plan") {
     if (!parsed.rest) return usageRoute(parsed.command);
-    return commandModePlanRoute("plan", parsed.rest);
+    return commandModePlanRoute("plan", parsed.rest, undefined, { metadata: options.metadata, plannerProvider: options.plannerProvider });
   }
 
   if (parsed.command === "/verify") {
     const target = await resolveRunTarget(parsed.command, parsed.rest);
     if (target.status === "needs_user_decision") return target.route;
-    return commandModePlanRoute("verify", target.request, target.anchor);
+    return commandModePlanRoute("verify", target.request, target.anchor, { metadata: options.metadata, plannerProvider: options.plannerProvider });
   }
 
   if (parsed.command === "/conv") {
     const target = await resolveRunTarget(parsed.command, parsed.rest);
     if (target.status === "needs_user_decision") return target.route;
-    return commandModePlanRoute("conv", target.request, target.anchor);
+    return commandModePlanRoute("conv", target.request, target.anchor, { metadata: options.metadata, plannerProvider: options.plannerProvider });
   }
 
   if (!parsed.rest) return usageRoute(parsed.command);
@@ -1920,7 +2049,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
     requestPath = await writeApprovedExecutionRequest(resolution.entry, options.metadata);
     approvalReference = resolution.entry.run_id;
   } else if (!looksLikeGoalRequestPath(parsed.rest)) {
-    return commandModePlanRoute("goal", parsed.rest);
+    return commandModePlanRoute("goal", parsed.rest, undefined, { metadata: options.metadata, plannerProvider: options.plannerProvider });
   }
 
   const result = await runGoal({ requestPath });

@@ -67,7 +67,11 @@ function isPlanningStatus(status: string): boolean {
     status === "plan_needs_clarification" ||
     status === "goal_needs_clarification" ||
     status === "verify_needs_clarification" ||
-    status === "conv_needs_clarification"
+    status === "conv_needs_clarification" ||
+    status === "plan_planner_unavailable" ||
+    status === "goal_planner_unavailable" ||
+    status === "verify_planner_unavailable" ||
+    status === "conv_planner_unavailable"
   );
 }
 
