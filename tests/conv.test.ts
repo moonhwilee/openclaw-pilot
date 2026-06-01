@@ -249,6 +249,24 @@ test("verify-fail to conv to verify fixture stays bounded", async () => {
   assert.equal(convResult.status, "completed");
 
   packet.evidence[0].path = convResult.rounds[0].evidence_update;
+  packet.specialized_reviewers = [
+    {
+      id: "reviewer-convergence",
+      role: "Convergence verifier",
+      specialty: "Fix confirmation",
+      verdict: "pass",
+      confidence: "high",
+      notes: ["The convergence round produced the missing evidence update."],
+    },
+    {
+      id: "reviewer-engineering",
+      role: "Engineering verifier",
+      specialty: "Local artifact and evidence mapping",
+      verdict: "pass",
+      confidence: "high",
+      notes: ["The updated evidence path points to the local convergence artifact."],
+    },
+  ];
   await writeJson(packetPath, packet);
   const secondVerify = await runVerify({
     packetPath,

@@ -144,6 +144,27 @@ export function validateEvidencePacket(packet: EvidencePacket): string[] {
     errors.push("deterministic_checks_only must be true for local Phase 2 verification");
   }
 
+  if (packet.specialized_reviewers !== undefined && !Array.isArray(packet.specialized_reviewers)) {
+    errors.push("invalid specialized reviewers");
+  }
+  const reviewerIds = new Set<string>();
+  for (const reviewer of packet.specialized_reviewers || []) {
+    if (!reviewer.id?.trim()) errors.push("missing specialized reviewer id");
+    if (reviewer.id && reviewerIds.has(reviewer.id)) errors.push(`duplicate specialized reviewer id: ${reviewer.id}`);
+    if (reviewer.id) reviewerIds.add(reviewer.id);
+    if (!reviewer.role?.trim()) errors.push(`missing specialized reviewer role: ${reviewer.id || "unknown"}`);
+    if (!reviewer.specialty?.trim()) errors.push(`missing specialized reviewer specialty: ${reviewer.id || "unknown"}`);
+    if (!["pass", "pass_with_risks", "needs_revision", "fail", "blocked"].includes(reviewer.verdict)) {
+      errors.push(`invalid specialized reviewer verdict: ${reviewer.id || "unknown"}`);
+    }
+    if (!["low", "medium", "high"].includes(reviewer.confidence)) {
+      errors.push(`invalid specialized reviewer confidence: ${reviewer.id || "unknown"}`);
+    }
+    if (!Array.isArray(reviewer.notes) || reviewer.notes.length === 0) {
+      errors.push(`missing specialized reviewer notes: ${reviewer.id || "unknown"}`);
+    }
+  }
+
   return errors;
 }
 

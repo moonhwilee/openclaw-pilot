@@ -28,5 +28,27 @@
   "reviewer_boundary": {
     "semantic_review_required": true,
     "deterministic_checks_only": true
-  }
+  },
+  "specialized_reviewers": [
+    {
+      "id": "reviewer-research",
+      "role": "Research verifier",
+      "specialty": "Source note relevance and claim fit",
+      "verdict": "pass",
+      "confidence": "high",
+      "notes": [
+        "The local source note is present and mapped to the required criterion."
+      ]
+    },
+    {
+      "id": "reviewer-engineering",
+      "role": "Engineering verifier",
+      "specialty": "Local artifact and schema evidence",
+      "verdict": "pass",
+      "confidence": "high",
+      "notes": [
+        "The fixture evidence remains local and in scope."
+      ]
+    }
+  ]
 }

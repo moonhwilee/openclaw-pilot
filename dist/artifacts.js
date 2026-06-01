@@ -129,15 +129,17 @@ export function renderVerificationMarkdown(result) {
         "# Pilot Verification Result",
         "",
         `Verdict: ${result.verdict}`,
+        `Semantic Verdict: ${result.semantic_verdict}`,
         `Run ID: ${result.run_id}`,
         `Claim: ${result.packet.claim.statement}`,
+        `Specialized Reviewers: ${result.reviewer_summary.reviewer_count}/${result.reviewer_summary.minimum_required}`,
         "",
         "Findings:",
         "",
         ...result.findings.map((finding) => `- ${finding.severity}: ${finding.code} - ${finding.message}`),
         "",
         "Execution: not performed. Phase 2 only evaluates the supplied evidence packet.",
-        "Semantic judgment: not performed by deterministic code.",
+        "Semantic judgment requires the reviewer boundary shown in verification.json.",
         "",
     ].join("\n");
 }

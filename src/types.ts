@@ -180,6 +180,25 @@ export type EvidencePacket = {
     semantic_review_required: boolean;
     deterministic_checks_only: boolean;
   };
+  specialized_reviewers?: SpecializedReviewer[];
+};
+
+export type SemanticVerificationVerdict =
+  | "pass"
+  | "pass_with_risks"
+  | "needs_revision"
+  | "fail"
+  | "blocked"
+  | "incomplete"
+  | "not_requested";
+
+export type SpecializedReviewer = {
+  id: string;
+  role: string;
+  specialty: string;
+  verdict: "pass" | "pass_with_risks" | "needs_revision" | "fail" | "blocked";
+  confidence: "low" | "medium" | "high";
+  notes: string[];
 };
 
 export type VerificationFinding = {
@@ -193,6 +212,13 @@ export type VerificationResult = {
   run_id: string;
   packet: EvidencePacket;
   verdict: VerificationVerdict;
+  semantic_verdict: SemanticVerificationVerdict;
+  reviewer_summary: {
+    required: boolean;
+    reviewer_count: number;
+    minimum_required: number;
+    status: "not_requested" | "missing_reviewers" | "completed";
+  };
   findings: VerificationFinding[];
   created_at: string;
   artifact_dir: string;

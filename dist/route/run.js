@@ -1158,12 +1158,14 @@ export async function runRoute(options) {
             backend: "openclaw-pilot",
             result_summary: {
                 verdict: result.verdict,
+                semantic_verdict: result.semantic_verdict,
+                reviewer_summary: result.reviewer_summary,
                 run_id: result.run_id,
                 artifact_dir: result.artifact_dir,
                 created_files: result.created_files,
                 profile_expectations: profileExpectationSummary(result.packet.claim.profile),
             },
-            user_report: userReport(result.verdict, result.created_files, findingRisks(result.findings), result.verdict === "sufficient_evidence"
+            user_report: userReport(result.semantic_verdict !== "not_requested" ? `semantic_${result.semantic_verdict}` : result.verdict, result.created_files, findingRisks(result.findings), result.verdict === "sufficient_evidence" && !["incomplete", "blocked", "fail", "needs_revision"].includes(result.semantic_verdict)
                 ? "Use the verification artifact as the evidence pointer for the next step."
                 : "Revise the evidence packet or run /conv against the listed findings."),
         };
