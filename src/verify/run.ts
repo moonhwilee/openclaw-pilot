@@ -3,6 +3,8 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createRunId, eventLine, prepareRunDirectory, renderVerificationMarkdown, writeJson } from "../artifacts.ts";
 import { defaultStateRoot } from "../config.ts";
 import { validateEvidencePacket } from "../schema/index.ts";
+import { appendLineageRecord } from "../state/lineage.ts";
+import { shortRunId } from "../state/run-index.ts";
 import type {
   EvidenceItem,
   EvidencePacket,
@@ -155,6 +157,28 @@ export async function runVerify(options: RunVerifyOptions): Promise<Verification
   await writeJson(files.verification, result);
   await writeFile(files.events, events.map(eventLine).join(""), "utf8");
   await writeFile(files.final, renderVerificationMarkdown(result), "utf8");
+  const lineage = await appendLineageRecord(stateRoot, {
+    schema_version: "pilot.lineage.v0",
+    created_at: createdAt,
+    record_type: "run",
+    command: "/verify",
+    run_id: runId,
+    short_run_id: shortRunId(runId),
+    status: verdict,
+    state_root: stateRoot,
+    artifact_dir: artifactDir,
+    evidence_pointers: Object.values(files),
+    resume_hint:
+      verdict === "sufficient_evidence"
+        ? "Use verification.json and final.md as proof for the claim."
+        : "Revise evidence or run /conv against fixable findings before re-verifying.",
+    metadata: {
+      claim_id: String(packet.claim?.id || ""),
+      profile: String(packet.claim?.profile || ""),
+    },
+  });
+  result.created_files = [...Object.values(files), lineage.run_path];
+  await writeJson(files.verification, result);
 
   return result;
 }

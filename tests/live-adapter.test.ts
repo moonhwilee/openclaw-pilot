@@ -37,7 +37,8 @@ test("live adapter formats enabled plan route as Telegram-safe text", async () =
   assert.equal(output.route.command, "/plan");
   assert.match(output.telegram_text, /Pilot/);
   assert.match(output.telegram_text, /Evidence/);
-  assert.match(output.telegram_text, /Next: Review the plan artifact/);
+  assert.match(output.telegram_text, /Run: \d{6}/);
+  assert.match(output.telegram_text, /Next: Review the plan. To continue, reply "approve /);
   assert.ok(output.telegram_text.length < 4000);
 });
 

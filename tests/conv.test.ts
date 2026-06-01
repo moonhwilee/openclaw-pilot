@@ -85,10 +85,15 @@ test("pilot conv reduces low-risk findings and writes receipts", async () => {
   assert.ok(result.created_files.includes(result.rounds[0].evidence_update));
   assert.equal(await fileExists(join(result.artifact_dir, "conv.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), true);
+  assert.equal(await fileExists(join(result.artifact_dir, "lineage.jsonl")), true);
+  assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
 
   const receipts = await readFile(join(result.artifact_dir, "receipts.jsonl"), "utf8");
   assert.match(receipts, /"schema_version":"pilot.receipt.v0"/);
   assert.match(receipts, /"capability":"local_artifact_note"/);
+  const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
+  assert.ok(lineage.includes('"command":"/conv"'));
+  assert.match(lineage, /"receipt_pointers":/);
 });
 
 test("pilot conv blocks missing anchor paths", async () => {

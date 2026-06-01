@@ -73,13 +73,18 @@ test("pilot verify returns sufficient_evidence for a well-formed document fixtur
   });
 
   assert.equal(result.verdict, "sufficient_evidence");
-  assert.equal(result.created_files.length, 3);
+  assert.equal(result.created_files.length, 4);
   assert.equal(await fileExists(join(result.artifact_dir, "verification.json")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "events.jsonl")), true);
   assert.equal(await fileExists(join(result.artifact_dir, "final.md")), true);
+  assert.equal(await fileExists(join(result.artifact_dir, "lineage.jsonl")), true);
+  assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
 
   const verification = JSON.parse(await readFile(join(result.artifact_dir, "verification.json"), "utf8"));
   assert.equal(verification.verdict, "sufficient_evidence");
+  assert.ok(verification.created_files.some((path: string) => path.endsWith("lineage.jsonl")));
+  const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
+  assert.ok(lineage.includes('"command":"/verify"'));
   assert.match(await readFile(join(result.artifact_dir, "events.jsonl"), "utf8"), /"semantic_judgment":"not_performed"/);
 });
 

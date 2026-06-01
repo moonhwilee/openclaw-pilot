@@ -31,10 +31,15 @@ test("runPlan creates the four v0 artifacts and completes without execution", as
   });
 
   assert.equal(result.status, "completed_plan");
-  assert.equal(result.created_files.length, 4);
-  for (const file of ["goal.json", "plan.md", "events.jsonl", "final.md"]) {
+  assert.equal(result.created_files.length, 5);
+  for (const file of ["goal.json", "plan.md", "events.jsonl", "final.md", "lineage.jsonl"]) {
     assert.equal(await fileExists(join(result.artifact_dir, file)), true, `${file} should exist`);
   }
+  assert.equal(await fileExists(join(stateRoot, "index", "lineage.jsonl")), true);
+  const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
+  assert.match(lineage, /"schema_version":"pilot.lineage.v0"/);
+  assert.ok(lineage.includes('"command":"/plan"'));
+  assert.match(lineage, /"record_type":"run"/);
 
   const goal = JSON.parse(await readFile(join(result.artifact_dir, "goal.json"), "utf8"));
   assert.equal(goal.schema_version, "pilot.goal.v0");

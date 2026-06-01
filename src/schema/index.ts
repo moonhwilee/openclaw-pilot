@@ -1,5 +1,6 @@
 import { isPhase1TerminalStatus } from "../state/index.ts";
 import { isSupportedProfile } from "../profiles/index.ts";
+import { goalCapabilityNames } from "../goal/capabilities.ts";
 import type { CommonPlanContract, ConvRequest, EventRecord, EvidencePacket, GoalArtifact, GoalRequest } from "../types.ts";
 
 const broadActionGrants = [
@@ -127,10 +128,7 @@ const safeConvCapabilities = new Set([
   "finding_status_update",
 ]);
 
-const safeGoalCapabilities = new Set([
-  "create_artifact",
-  "review_document",
-]);
+const safeGoalCapabilities: ReadonlySet<string> = new Set(goalCapabilityNames);
 
 const dangerousCapabilityHints = [
   "external",

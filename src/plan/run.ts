@@ -4,6 +4,8 @@ import { DEFAULT_PROFILE, defaultStateRoot } from "../config.ts";
 import { createRunId, eventLine, prepareRunDirectory, renderFinalMarkdown, renderPlanMarkdown, writeJson } from "../artifacts.ts";
 import { validateCommonPlanContract, validateGoalArtifact } from "../schema/index.ts";
 import { isPhase1TerminalStatus } from "../state/index.ts";
+import { appendLineageRecord } from "../state/lineage.ts";
+import { shortRunId } from "../state/run-index.ts";
 import type { EventRecord, GoalArtifact, PlanResult } from "../types.ts";
 import { buildPlan } from "./generate.ts";
 
@@ -85,6 +87,26 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
   await writeFile(files.plan, renderPlanMarkdown(plan), "utf8");
   await writeFile(files.events, events.map(eventLine).join(""), "utf8");
   await writeFile(files.final, renderFinalMarkdown(goal), "utf8");
+  const lineage = await appendLineageRecord(stateRoot, {
+    schema_version: "pilot.lineage.v0",
+    created_at: createdAt,
+    record_type: "run",
+    command: "/plan",
+    run_id: runId,
+    short_run_id: shortRunId(runId),
+    status,
+    state_root: stateRoot,
+    artifact_dir: artifactDir,
+    evidence_pointers: Object.values(files),
+    resume_hint:
+      status === "completed_plan"
+        ? `Review the plan, then approve ${shortRunId(runId)} if it should execute.`
+        : "Answer ambiguity questions, then rerun /plan or /goal.",
+    metadata: {
+      profile: DEFAULT_PROFILE,
+      execution: "not_performed",
+    },
+  });
 
   return {
     run_id: runId,
@@ -92,6 +114,6 @@ export async function runPlan(options: RunPlanOptions): Promise<PlanResult> {
     artifact_dir: artifactDir,
     goal,
     plan,
-    created_files: Object.values(files),
+    created_files: [...Object.values(files), lineage.run_path],
   };
 }

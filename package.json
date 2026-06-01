@@ -12,6 +12,13 @@
     "url": "https://github.com/moonhwilee/openclaw-pilot/issues"
   },
   "homepage": "https://github.com/moonhwilee/openclaw-pilot#readme",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./core": "./dist/core/run.js",
+    "./gateway": "./dist/gateway-bridge/run.js",
+    "./telegram": "./dist/telegram-adapter/run.js"
+  },
   "bin": {
     "pilot": "./dist/cli.js"
   },
