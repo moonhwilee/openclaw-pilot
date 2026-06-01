@@ -105,6 +105,50 @@ function unavailable(command: RouteResult["command"]): RouteResult {
   };
 }
 
+const commandUsage: Record<"/plan" | "/verify" | "/conv" | "/goal", { usage: string; example: string; missing: string; next: string }> = {
+  "/plan": {
+    usage: "/plan <what to plan>",
+    example: "/plan Draft a rollout plan for the Pilot Telegram smoke test.",
+    missing: "Missing planning request.",
+    next: "Send /plan followed by the work you want Pilot to plan.",
+  },
+  "/goal": {
+    usage: "/goal <what to accomplish>",
+    example: "/goal Create a tiny local smoke file and verify it.",
+    missing: "Missing goal objective.",
+    next: "Send /goal followed by a concrete objective. Pilot will plan first and wait for approval before execution.",
+  },
+  "/verify": {
+    usage: "/verify <evidence-packet.json>",
+    example: "/verify artifacts/pilot/evidence-packet.json",
+    missing: "Missing evidence packet path.",
+    next: "Send /verify followed by an evidence packet JSON path.",
+  },
+  "/conv": {
+    usage: "/conv <conv-request.json>",
+    example: "/conv artifacts/pilot/conv-request.json",
+    missing: "Missing convergence request path.",
+    next: "Send /conv followed by a convergence request JSON path.",
+  },
+};
+
+function usageRoute(command: "/plan" | "/verify" | "/conv" | "/goal"): RouteResult {
+  const usage = commandUsage[command];
+  return {
+    schema_version: "pilot.route.v0",
+    status: "needs_user_decision",
+    command,
+    enabled: true,
+    backend: "openclaw-pilot",
+    result_summary: {
+      status: "command_needs_input",
+      usage: usage.usage,
+      example: usage.example,
+    },
+    user_report: userReport("command_needs_input", [], [usage.missing, `Usage: ${usage.usage}`, `Example: ${usage.example}`], usage.next),
+  };
+}
+
 function parseRouteInput(input: string): { command: RouteResult["command"]; rest: string } {
   const trimmed = input.trim();
   const [rawCommand, ...restParts] = trimmed.split(/\s+/);
@@ -1347,7 +1391,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   }
 
   if (parsed.command === "/plan") {
-    if (!parsed.rest) throw new Error("route /plan requires a request");
+    if (!parsed.rest) return usageRoute(parsed.command);
     const result = await runPlan({ request: parsed.rest });
     const shortId = shortRunId(result.run_id);
     return {
@@ -1379,7 +1423,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   }
 
   if (parsed.command === "/verify") {
-    if (!parsed.rest) throw new Error("route /verify requires an evidence packet JSON path");
+    if (!parsed.rest) return usageRoute(parsed.command);
     const result = await runVerify({ packetPath: parsed.rest });
     return {
       schema_version: "pilot.route.v0",
@@ -1406,7 +1450,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
   }
 
   if (parsed.command === "/conv") {
-    if (!parsed.rest) throw new Error("route /conv requires a conv request JSON path");
+    if (!parsed.rest) return usageRoute(parsed.command);
     const result = await runConv({ requestPath: parsed.rest });
     return {
       schema_version: "pilot.route.v0",
@@ -1432,7 +1476,7 @@ export async function runRoute(options: RunRouteOptions): Promise<RouteResult> {
     };
   }
 
-  if (!parsed.rest) throw new Error("route /goal requires a goal request, goal request JSON path, or approved run reference");
+  if (!parsed.rest) return usageRoute(parsed.command);
   let requestPath = parsed.rest;
   let approvalReference: string | undefined;
   if (looksLikeRunReference(parsed.rest)) {
