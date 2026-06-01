@@ -8,18 +8,18 @@ Current roadmap and TODO are tracked in
 The next PilotLead UX and quality-loop implementation contract is documented
 in `docs/pilotlead-v0.2.8-product-contract.md`.
 
-The current natural-command UX contract is documented in
-`docs/natural-command-contract-v0.2.11.md`, with the v0.2.12 implementation-review
-amendment: user-facing commands are natural-language-first, broad versioned
-implementation `/verify` requests create an approval-backed verification plan,
-and JSON artifact execution is maintainer-only through `pilot artifact`.
+The current command-mode planning contract is documented in
+`docs/command-mode-planning-contract-v0.3.0.md`: `/plan`, `/goal`, `/verify`,
+and `/conv` are explicit planning modes, natural prose becomes a typed plan
+rather than execution authority, and JSON artifact execution is maintainer-only
+through `pilot artifact`.
 
 ## Install
 
 From the current GitHub release:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.2.12
+npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.3.0
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
@@ -47,9 +47,9 @@ Current scope:
 - `pilot doctor` reports package/config/state health in a user-friendly way.
 - `pilot smoke` runs a quick maintainer/CI health check over the shipped fixtures, including the typed `execution-plan.json` contract/hash check.
 - `pilot plan <request>` creates local plan artifacts only.
-- `pilot verify <natural target>` treats verification as content review by default. Broad versioned implementation-review requests create a scoped verification plan and wait for approval; insufficient concrete evidence still refuses to present mechanical artifact checks as implementation approval.
-- `pilot conv <natural target>` converges clear findings from a recent run, run reference, or supplied anchor, and asks for a clearer anchor or plan when prose is broad.
-- `pilot goal <natural objective>` creates a goal-intake plan and waits for approval before execution.
+- `pilot verify <natural target>` creates a verify-mode plan and waits for approval before collecting evidence, running review work, or writing a verdict.
+- `pilot conv <natural target>` creates a conv-mode plan and waits for approval before convergence rounds, file edits, or finding reduction.
+- `pilot goal <natural objective>` creates a goal-mode execution plan and waits for approval before execution.
 - `pilot artifact verify <evidence-packet.json>` runs maintainer-only mechanical evidence packet verification.
 - `pilot artifact conv <conv-request.json>` runs maintainer-only bounded convergence from a typed conv request.
 - `pilot artifact goal-request <goal-request.json>` runs maintainer-only typed goal request fixtures.
@@ -130,7 +130,15 @@ PILOT_RECOVERY_STALE_AFTER_MS=1800000 npm run pilot -- status <Run>
 
 `PILOT_RECOVERY_STALE_AFTER_MS` controls when a non-terminal, non-cancelled run is shown as stale in `list`, `status`, and `resume` output. The default is 30 minutes. Stale status does not mean "rerun from the beginning"; `resume <Run>` uses the latest safe checkpoint. The current v1 slice can auto-resume approved runner-backed work from `execute`, restart a missing post-execution `verify`, run bounded `converge` for fixable verification findings, restart a missing post-convergence `reverify`, and continue standalone `/conv` from `conv-checkpoint.json`.
 
-Standalone user-facing `/verify` means content review. Broad versioned implementation-review requests such as release/update audits create `verify_plan_created` with an approval-backed evidence-collection plan instead of asking for a generic run id. If the route still does not have enough concrete scope to review the actual implementation or outcome, it returns `verify_needs_evidence` instead of silently creating a deterministic-only packet. Mechanical evidence packet verification remains available through `pilot artifact verify`. The future checkpoint contract is opened as `pilot.verify_checkpoint.v0`: long verification can record processed criteria, processed evidence, written findings, and the next verification action before adding criteria-level resume execution.
+Standalone user-facing `/verify` means verify-mode planning. Natural requests
+create `verify_plan_created` with an approval-backed evidence-collection and
+review plan instead of asking for a generic run id or running deterministic-only
+artifact checks. Concrete run ids and recent aliases are mechanical anchors, not
+execution authority. Mechanical evidence packet verification remains available
+through `pilot artifact verify`. The future checkpoint contract is opened as
+`pilot.verify_checkpoint.v0`: long verification can record processed criteria,
+processed evidence, written findings, and the next verification action before
+adding criteria-level resume execution.
 
 Enable a session runner explicitly:
 

@@ -1,13 +1,13 @@
 # OpenClaw Pilot Current Roadmap
 
-Status: v0.2.12 implementation-review verify hotfix in progress
+Status: v0.3.0 command-mode planning implementation
 Owner: Geumbi / Moonhwi Lee
 
 ## Current Release
 
-- Current shipped release: v0.2.11
-- Current target: v0.2.12
-- Release theme: broad implementation `/verify` creates scoped review plans
+- Current shipped release: v0.2.12
+- Current target: v0.3.0
+- Release theme: command-mode planning for natural user commands
 
 ## v0.2.11 Scope
 
@@ -34,6 +34,33 @@ Owner: Geumbi / Moonhwi Lee
 - Generic underspecified `/verify` still returns `verify_needs_evidence`; JSON
   artifact execution remains maintainer-only through `pilot artifact`.
 
+## v0.3.0 Target
+
+Source of truth: `docs/command-mode-planning-contract-v0.3.0.md`.
+
+- Treat `/plan`, `/goal`, `/verify`, and `/conv` as explicit planning modes.
+- Keep the command parser thin and the target resolver mechanical.
+- Route natural requests through mode-aware planning, not command-specific
+  keyword or version regex branches.
+- Reuse `CommonPlanContract`, `execution-plan.json`, canonical plan hashes, and
+  explicit approval as the execution boundary.
+- Remove the v0.2.12 implementation-review special route after replacing it with
+  verify-mode planning coverage.
+- Keep JSON artifacts maintainer-only through `pilot artifact`.
+
+## v0.3.0 Implementation Status
+
+- `PlanMode = plan | goal | verify | conv` is added.
+- `runPlan()` carries mode and optional mechanical anchor into plan generation,
+  execution-plan inputs, events, and lineage.
+- Natural `/plan`, `/goal`, `/verify`, and `/conv` routes now create
+  command-mode plans.
+- `/verify` no longer has version or implementation-keyword route branches.
+- `/conv` no longer writes `natural-conv-request.json` or runs convergence from
+  broad user prose.
+- Old natural evidence-packet and natural conv request helpers were removed from
+  the user route code path.
+
 ## Maintainer Artifact Commands
 
 ```bash
@@ -45,10 +72,13 @@ pilot artifact goal-request <goal-request.json>
 These commands keep deterministic fixture, smoke, and CI checks available without
 making JSON artifacts the default user experience.
 
-## Next Work
+## Verification Gates
 
-- Run and evaluate the approved broad implementation verification plan with the
-  real session runner.
-- Add criteria-level long verification checkpoints and resume behavior.
-- Improve `/conv` guidance so broad convergence requests can be converted into a
-  clear `/goal` plan when no actionable finding exists.
+- Build must pass.
+- Full test suite must pass.
+- Smoke and pack dry-run must pass.
+- Grep gates must show no v0.2.12 special route functions or old natural
+  artifact fallback helpers in `src/`.
+- Live smoke must show `/verify 계획문서를 검증해보자` returns
+  `verify_plan_created`, not `verify_needs_evidence`.
+- Gateway restart still requires preflight before applying the installed build.

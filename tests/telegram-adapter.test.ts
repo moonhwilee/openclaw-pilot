@@ -166,7 +166,7 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     });
 
     assert.equal(result.authorized, true);
-    assert.equal(result.command_result?.status, "routed");
+    assert.equal(result.command_result?.status, "awaiting_approval");
     assert.equal(result.route?.command, "/goal");
     assert.equal(result.route?.user_report.status, "goal_plan_created");
     assert.ok(Array.isArray(result.route?.result_summary?.plan_preview));
@@ -213,7 +213,7 @@ test("Telegram adapter accepts freeform goal objectives containing filesystem pa
     });
 
     assert.equal(result.authorized, true);
-    assert.equal(result.command_result?.status, "routed");
+    assert.equal(result.command_result?.status, "awaiting_approval");
     assert.equal(result.route?.command, "/goal");
     assert.equal(result.route?.user_report.status, "goal_plan_created");
     assert.match(result.telegram_text, /Status: goal_plan_created/);

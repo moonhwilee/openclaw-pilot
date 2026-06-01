@@ -1,13 +1,14 @@
 # Natural Command Contract v0.2.11
 
-Status: implemented safety contract
+Status: superseded safety contract
 Owner: Geumbi / Moonhwi Lee
 Target release: v0.2.11
 
-v0.2.12 amendment: broad versioned implementation-review `/verify` requests do
-not stop with generic evidence guidance. They create `verify_plan_created`, keep
-the recognized version scope, and wait for approval before evidence collection
-or runner-backed review.
+Superseded by `docs/command-mode-planning-contract-v0.3.0.md`. This document is
+kept as historical context for the v0.2.11 safety work. The current design no
+longer uses v0.2.12's version/keyword implementation-review route. Natural
+`/verify` and `/conv` requests now enter command-mode planning and wait for
+approval before evidence collection, review, or convergence.
 
 ## Purpose
 

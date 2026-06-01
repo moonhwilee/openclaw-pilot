@@ -245,7 +245,7 @@ test("approval, resume, and cancel recent aliases require explicit target confir
   }
 });
 
-test("/verify recent target requires content-review evidence instead of deterministic-only pass", async () => {
+test("/verify recent target creates a command-mode verification plan instead of deterministic-only pass", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -254,11 +254,13 @@ test("/verify recent target requires content-review evidence instead of determin
 
     const verify = await runRoute({ input: "/verify 최근 plan 결과가 충분히 남았는지 검증해줘", enabled: true });
 
-    assert.equal(verify.status, "needs_user_decision");
+    assert.equal(verify.status, "awaiting_approval");
     assert.equal(verify.command, "/verify");
-    assert.equal(verify.user_report.status, "verify_needs_evidence");
+    assert.equal(verify.user_report.status, "verify_plan_created");
+    assert.equal(verify.result_summary?.plan_mode, "verify");
+    assert.match(verify.user_report.next_action, /approve \d{6}/);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|natural-verify-evidence-packet\.json/);
-    assert.ok(verify.user_report.remaining_risks.some((risk) => risk.includes("content review")));
+    assert.ok(verify.user_report.progress?.some((line) => line.includes("Mode: verification plan")));
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -268,7 +270,7 @@ test("/verify recent target requires content-review evidence instead of determin
   }
 });
 
-test("broad implementation /verify creates a scoped review plan instead of asking for generic evidence", async () => {
+test("broad implementation /verify creates a command-mode review plan without a hardcoded version route", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -282,11 +284,33 @@ test("broad implementation /verify creates a scoped review plan instead of askin
 
     assert.equal(verify.status, "awaiting_approval");
     assert.equal(verify.user_report.status, "verify_plan_created");
+    assert.equal(verify.result_summary?.plan_mode, "verify");
     assert.match(verify.user_report.next_action, /approve \d{6}/);
     assert.ok(verify.user_report.evidence_pointers.some((pointer) => pointer.endsWith("plan.md")));
-    assert.ok(verify.user_report.progress?.some((line) => line.includes("v0.2.8, v0.2.9, v0.2.10, v0.2.11")));
-    assert.deepEqual(verify.result_summary?.version_scope, ["v0.2.8", "v0.2.9", "v0.2.10", "v0.2.11"]);
+    assert.ok(verify.user_report.progress?.some((line) => line.includes("Router: command mode plus mechanical target only")));
+    assert.equal(verify.result_summary?.version_scope, undefined);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|Findings: none|natural-verify-evidence-packet/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/verify short natural prose creates a verify-mode plan instead of generic evidence guidance", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const verify = await runRoute({ input: "/verify 계획문서를 검증해보자", enabled: true });
+
+    assert.equal(verify.status, "awaiting_approval");
+    assert.equal(verify.command, "/verify");
+    assert.equal(verify.user_report.status, "verify_plan_created");
+    assert.equal(verify.result_summary?.plan_mode, "verify");
+    assert.doesNotMatch(verify.user_report.next_action, /Provide a concrete run id/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -315,7 +339,7 @@ test("/verify JSON path is disabled on user-facing routes", async () => {
   }
 });
 
-test("/conv natural language target builds an internal conv request from recent verification findings", async () => {
+test("/conv natural language target creates an approval-backed convergence plan", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -354,10 +378,12 @@ test("/conv natural language target builds an internal conv request from recent 
 
     const conv = await runRoute({ input: "/conv 최근 검증에서 나온 P2 문제 수렴해줘", enabled: true });
 
-    assert.equal(conv.status, "routed");
+    assert.equal(conv.status, "awaiting_approval");
     assert.equal(conv.command, "/conv");
-    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("natural-conv-request.json")));
-    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("conv.json")));
+    assert.equal(conv.user_report.status, "conv_plan_created");
+    assert.equal(conv.result_summary?.plan_mode, "conv");
+    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("plan.md")));
+    assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -367,7 +393,7 @@ test("/conv natural language target builds an internal conv request from recent 
   }
 });
 
-test("broad natural /conv does not silently bind to the newest verification finding", async () => {
+test("broad natural /conv creates a convergence plan without silently binding to newest findings", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();
   process.env.PILOT_STATE_ROOT = stateRoot;
@@ -392,9 +418,31 @@ test("broad natural /conv does not silently bind to the newest verification find
 
     const conv = await runRoute({ input: "/conv 네 제안을 오버엔지니어링 없이 수렴해줘", enabled: true });
 
-    assert.equal(conv.status, "needs_user_decision");
-    assert.equal(conv.user_report.status, "conv_needs_anchor_or_plan");
-    assert.deepEqual(conv.user_report.evidence_pointers, []);
+    assert.equal(conv.status, "awaiting_approval");
+    assert.equal(conv.user_report.status, "conv_plan_created");
+    assert.equal(conv.result_summary?.plan_mode, "conv");
+    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("plan.md")));
+    assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/conv short natural prose creates a conv-mode plan without prose execution", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const conv = await runRoute({ input: "/conv 이 설계대로 고쳐줘", enabled: true });
+
+    assert.equal(conv.status, "awaiting_approval");
+    assert.equal(conv.command, "/conv");
+    assert.equal(conv.user_report.status, "conv_plan_created");
+    assert.equal(conv.result_summary?.plan_mode, "conv");
     assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
   } finally {
     if (previousStateRoot === undefined) {
@@ -1275,7 +1323,7 @@ test("approve route executes freeform local file creation goals through the sess
       enabled: true,
       metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23360" },
     });
-    assert.equal(plan.status, "routed");
+    assert.equal(plan.status, "awaiting_approval");
     assert.equal(plan.user_report.status, "goal_plan_created");
     const shortId = plan.result_summary?.short_run_id as string;
     const planRunId = plan.result_summary?.run_id as string;
@@ -1369,10 +1417,10 @@ test("/goal freeform route creates a goal-intake plan without execution", async 
       metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23150" },
     });
 
-    assert.equal(output.status, "routed");
+    assert.equal(output.status, "awaiting_approval");
     assert.equal(output.command, "/goal");
     assert.equal(output.user_report.status, "goal_plan_created");
-    assert.equal(output.result_summary?.mode, "goal_intake_plan");
+    assert.equal(output.result_summary?.plan_mode, "goal");
     assert.match(String(output.result_summary?.short_run_id || ""), /^\d{6}$/);
     assert.match(output.user_report.next_action, /approve \d{6}/);
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("goal.json")));
@@ -1396,10 +1444,10 @@ test("/goal freeform route treats filesystem paths inside objectives as goal tex
       metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23453" },
     });
 
-    assert.equal(output.status, "routed");
+    assert.equal(output.status, "awaiting_approval");
     assert.equal(output.command, "/goal");
     assert.equal(output.user_report.status, "goal_plan_created");
-    assert.equal(output.result_summary?.mode, "goal_intake_plan");
+    assert.equal(output.result_summary?.plan_mode, "goal");
     assert.match(output.user_report.next_action, /approve \d{6}/);
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("goal.json")));
   } finally {
@@ -1423,7 +1471,7 @@ test("/goal vague freeform route asks for clarification without handoff executio
     assert.equal(output.status, "needs_user_decision");
     assert.equal(output.command, "/goal");
     assert.equal(output.user_report.status, "goal_needs_clarification");
-    assert.equal(output.result_summary?.mode, "goal_intake_plan");
+    assert.equal(output.result_summary?.plan_mode, "goal");
     assert.match(output.user_report.next_action, /Answer the ambiguity questions/);
     assert.ok(output.user_report.remaining_risks.some((risk) => risk.includes("concrete outcome")));
   } finally {

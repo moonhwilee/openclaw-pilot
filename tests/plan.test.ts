@@ -246,7 +246,7 @@ test("CLI goal natural objective creates a goal-intake plan without execution", 
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "routed");
-  assert.equal(output.result_summary.mode, "goal_intake_plan");
+  assert.equal(output.status, "awaiting_approval");
+  assert.equal(output.result_summary.plan_mode, "goal");
   assert.equal(output.user_report.status, "goal_plan_created");
 });

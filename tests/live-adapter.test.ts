@@ -96,7 +96,8 @@ test("live adapter turns broad implementation verify into an approval-backed pla
   assert.equal(output.route.command, "/verify");
   assert.ok(output.telegram_text.length < 4000);
   assert.match(output.telegram_text, /Status: verify_plan_created/);
-  assert.match(output.telegram_text, /Scope: v0\.2\.8, v0\.2\.9, v0\.2\.10, v0\.2\.11/);
+  assert.match(output.telegram_text, /Mode: verification plan/);
+  assert.match(output.telegram_text, /Router: command mode plus mechanical target only/);
   assert.match(output.telegram_text, /Next: Review the verification plan/);
   assert.doesNotMatch(output.telegram_text, /Provide a concrete run id/);
 
