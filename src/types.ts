@@ -85,6 +85,24 @@ export type GoalPhasePlan = {
   pass_criteria: string[];
 };
 
+export type GoalMilestoneStatus =
+  | "planned"
+  | "running"
+  | "check_passed"
+  | "needs_convergence"
+  | "converged"
+  | "blocked";
+
+export type GoalMilestone = {
+  phase_index: number;
+  goal_phase: string;
+  objective: string;
+  slice_ids: string[];
+  phase_verify: string;
+  pass_criteria: string[];
+  status: GoalMilestoneStatus;
+};
+
 export type CommonPlanContract = {
   goal: string;
   outcome_summary?: string;
@@ -295,6 +313,7 @@ export type ExecutionPlan = {
   plan_run_id: string;
   approval_subject_hash: string;
   goal_summary: string;
+  goal_milestones?: GoalMilestone[];
   steps: ExecutionStep[];
   forbidden_actions: string[];
   requires_reapproval_if: string[];

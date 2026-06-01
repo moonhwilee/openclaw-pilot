@@ -1,5 +1,5 @@
 import { withExecutionPlanHash } from "../execution-plan.ts";
-import type { CommonPlanContract, ExecutionPlan, GoalPhasePlan, RunStatus } from "../types.ts";
+import type { CommonPlanContract, ExecutionPlan, GoalMilestone, GoalPhasePlan, RunStatus } from "../types.ts";
 
 const vagueRequests = new Set(["도와줘", "해줘", "help", "help me", "뭔가 해줘", "알아서 해줘"]);
 
@@ -166,6 +166,20 @@ export function buildPlan(request: string): { status: RunStatus; ambiguityQuesti
   return { status, ambiguityQuestions, plan };
 }
 
+function buildGoalMilestones(phasePlan: GoalPhasePlan[] | undefined): GoalMilestone[] | undefined {
+  if (!phasePlan?.length) return undefined;
+
+  return phasePlan.map((phase, index) => ({
+    phase_index: index + 1,
+    goal_phase: phase.goal_phase,
+    objective: phase.objective,
+    slice_ids: phase.slices.map((slice) => slice.id),
+    phase_verify: phase.phase_verify,
+    pass_criteria: phase.pass_criteria,
+    status: "planned",
+  }));
+}
+
 function selectsPilotReceiptsDashboardStep(request: string): boolean {
   const normalized = request.toLowerCase();
   return normalized.includes("dashboard") && normalized.includes("receipt");
@@ -219,7 +233,11 @@ function requiresCodexRunner(request: string): boolean {
   ].some((token) => normalized.includes(token));
 }
 
-export function buildExecutionPlan(request: string, planRunId: string): ExecutionPlan | undefined {
+export function buildExecutionPlan(
+  request: string,
+  planRunId: string,
+  phasePlan?: GoalPhasePlan[],
+): ExecutionPlan | undefined {
   if (requestLooksVague(request)) return undefined;
 
   const capability = selectsPilotReceiptsDashboardStep(request)
@@ -250,6 +268,7 @@ export function buildExecutionPlan(request: string, planRunId: string): Executio
     schema_version: "pilot.execution_plan.v0",
     plan_run_id: planRunId,
     goal_summary: request.trim(),
+    goal_milestones: buildGoalMilestones(phasePlan),
     steps: [
       {
         id: "step-1",

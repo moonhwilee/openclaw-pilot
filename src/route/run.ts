@@ -80,9 +80,12 @@ function executionPlanApprovalPreview(plan: ExecutionPlan | undefined, shortId: 
   const capabilities = [...new Set(plan.steps.map((step) => step.capability))].join(", ");
   const riskClasses = [...new Set(plan.steps.map((step) => step.risk_class))].join(", ");
   const expectedArtifacts = [...new Set(plan.steps.flatMap((step) => step.expected_artifacts))].slice(0, 5).join(", ");
+  const milestoneCount = plan.goal_milestones?.length || 0;
+  const sliceCount = plan.goal_milestones?.reduce((count, milestone) => count + milestone.slice_ids.length, 0) || 0;
   return [
     `Plan hash: ${plan.approval_subject_hash.slice(0, 12)}`,
     `Steps: ${plan.steps.length}`,
+    ...(milestoneCount > 0 ? [`Goal milestones: ${milestoneCount} phases, ${sliceCount} slices`] : []),
     `Capabilities: ${capabilities || "none"}`,
     `Risk: ${riskClasses || "none"}`,
     `Expected artifacts: ${expectedArtifacts || "none"}`,

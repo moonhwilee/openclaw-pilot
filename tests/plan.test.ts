@@ -102,6 +102,13 @@ test("large implementation plans include outcome-first phase and slice guidance"
   assert.ok(planMarkdown.indexOf("## Outcome First") < planMarkdown.indexOf("## Scope"));
   assert.match(planMarkdown, /## Phase \/ Slice Plan/);
   assert.match(planMarkdown, /goal_phase_1_plan_quality/);
+
+  const executionPlan = JSON.parse(await readFile(join(result.artifact_dir, "execution-plan.json"), "utf8"));
+  assert.deepEqual(validateExecutionPlan(executionPlan), []);
+  assert.ok(executionPlan.goal_milestones?.length);
+  assert.equal(executionPlan.goal_milestones[0].phase_index, 1);
+  assert.equal(executionPlan.goal_milestones[0].status, "planned");
+  assert.ok(executionPlan.goal_milestones[0].slice_ids.includes("slice_1_outcome_first_plan"));
 });
 
 test("overbroad allowed actions are rejected by schema validation", () => {
@@ -157,6 +164,43 @@ test("goal phases must not reuse lifecycle phase names", () => {
   };
 
   const errors = validateCommonPlanContract(plan);
+  assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
+});
+
+test("execution plan milestones must not reuse lifecycle phase names", () => {
+  const executionPlan = {
+    schema_version: "pilot.execution_plan.v0" as const,
+    plan_run_id: "test-plan",
+    approval_subject_hash: "",
+    goal_summary: "Bad milestone plan",
+    goal_milestones: [
+      {
+        phase_index: 1,
+        goal_phase: "verify",
+        objective: "This collides with lifecycle phase naming.",
+        slice_ids: ["slice_1"],
+        phase_verify: "phase check",
+        pass_criteria: ["pass"],
+        status: "planned" as const,
+      },
+    ],
+    steps: [
+      {
+        id: "step-1",
+        capability: "create_artifact",
+        risk_class: "low" as const,
+        scope: ["Create a bounded local artifact."],
+        inputs: {},
+        expected_artifacts: ["artifact.md"],
+        verification_gates: ["artifact exists"],
+        stop_conditions: ["success_criteria_met"],
+      },
+    ],
+    forbidden_actions: ["external_message"],
+    requires_reapproval_if: ["scope changes"],
+  };
+
+  const errors = validateExecutionPlan(executionPlan);
   assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
 });
 

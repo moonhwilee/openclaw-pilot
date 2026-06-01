@@ -156,6 +156,19 @@ export function buildPlan(request) {
     };
     return { status, ambiguityQuestions, plan };
 }
+function buildGoalMilestones(phasePlan) {
+    if (!phasePlan?.length)
+        return undefined;
+    return phasePlan.map((phase, index) => ({
+        phase_index: index + 1,
+        goal_phase: phase.goal_phase,
+        objective: phase.objective,
+        slice_ids: phase.slices.map((slice) => slice.id),
+        phase_verify: phase.phase_verify,
+        pass_criteria: phase.pass_criteria,
+        status: "planned",
+    }));
+}
 function selectsPilotReceiptsDashboardStep(request) {
     const normalized = request.toLowerCase();
     return normalized.includes("dashboard") && normalized.includes("receipt");
@@ -203,7 +216,7 @@ function requiresCodexRunner(request) {
         "리팩터",
     ].some((token) => normalized.includes(token));
 }
-export function buildExecutionPlan(request, planRunId) {
+export function buildExecutionPlan(request, planRunId, phasePlan) {
     if (requestLooksVague(request))
         return undefined;
     const capability = selectsPilotReceiptsDashboardStep(request)
@@ -232,6 +245,7 @@ export function buildExecutionPlan(request, planRunId) {
         schema_version: "pilot.execution_plan.v0",
         plan_run_id: planRunId,
         goal_summary: request.trim(),
+        goal_milestones: buildGoalMilestones(phasePlan),
         steps: [
             {
                 id: "step-1",

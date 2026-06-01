@@ -231,6 +231,36 @@ export function validateExecutionPlan(plan: ExecutionPlan): string[] {
   if (!Array.isArray(plan.forbidden_actions)) errors.push("missing forbidden actions");
   if (!Array.isArray(plan.requires_reapproval_if)) errors.push("missing reapproval triggers");
 
+  if (plan.goal_milestones !== undefined && !Array.isArray(plan.goal_milestones)) {
+    errors.push("invalid goal milestones");
+  }
+
+  const milestoneIndexes = new Set<number>();
+  for (const milestone of plan.goal_milestones || []) {
+    if (!Number.isInteger(milestone.phase_index) || milestone.phase_index < 1) {
+      errors.push(`invalid goal milestone phase index: ${milestone.goal_phase || "unknown"}`);
+    }
+    if (milestoneIndexes.has(milestone.phase_index)) {
+      errors.push(`duplicate goal milestone phase index: ${milestone.phase_index}`);
+    }
+    milestoneIndexes.add(milestone.phase_index);
+    if (!milestone.goal_phase?.trim()) errors.push("missing goal milestone phase");
+    if (lifecyclePhaseNames.has(milestone.goal_phase)) {
+      errors.push(`goal milestone must not reuse lifecycle phase name: ${milestone.goal_phase}`);
+    }
+    if (!milestone.objective?.trim()) errors.push(`missing goal milestone objective: ${milestone.goal_phase || "unknown"}`);
+    if (!Array.isArray(milestone.slice_ids) || milestone.slice_ids.length === 0) {
+      errors.push(`missing goal milestone slice ids: ${milestone.goal_phase || "unknown"}`);
+    }
+    if (!milestone.phase_verify?.trim()) errors.push(`missing goal milestone verify gate: ${milestone.goal_phase || "unknown"}`);
+    if (!Array.isArray(milestone.pass_criteria) || milestone.pass_criteria.length === 0) {
+      errors.push(`missing goal milestone pass criteria: ${milestone.goal_phase || "unknown"}`);
+    }
+    if (!["planned", "running", "check_passed", "needs_convergence", "converged", "blocked"].includes(milestone.status)) {
+      errors.push(`invalid goal milestone status: ${milestone.goal_phase || "unknown"}`);
+    }
+  }
+
   const calculatedHash = hashExecutionPlan(plan);
   if (plan.approval_subject_hash && plan.approval_subject_hash !== calculatedHash) {
     errors.push("execution plan hash mismatch");

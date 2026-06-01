@@ -41,7 +41,7 @@ export async function runPlan(options) {
     if (goalValidationErrors.length > 0) {
         throw new Error(`generated goal failed validation: ${goalValidationErrors.join("; ")}`);
     }
-    const executionPlan = status === "completed_plan" ? buildExecutionPlan(request, runId) : undefined;
+    const executionPlan = status === "completed_plan" ? buildExecutionPlan(request, runId, plan.phase_plan) : undefined;
     if (status === "completed_plan" && !executionPlan) {
         throw new Error("completed plan did not produce an execution plan");
     }
