@@ -56,9 +56,39 @@ function isPilotReceiptsDashboardRequest(request: string): boolean {
   return normalized.includes("dashboard") && normalized.includes("receipt");
 }
 
+function hasLocalFileReference(request: string): boolean {
+  return /(?:^|\s)(?:\/Users\/\S+|\/tmp\/\S+|\.{1,2}\/\S+|\S+\/\S+\.[A-Za-z0-9]{1,12})(?:\s|$|[.,;:!?")\]])/.test(
+    request,
+  );
+}
+
+function asksToMutateLocalFile(request: string): boolean {
+  const normalized = request.toLowerCase();
+  const mutationTokens = [
+    "create",
+    "write",
+    "save",
+    "generate",
+    "make",
+    "update",
+    "modify",
+    "edit",
+    "append",
+    "replace",
+    "touch",
+    "생성",
+    "작성",
+    "저장",
+    "수정",
+    "추가",
+    "교체",
+  ];
+  return hasLocalFileReference(request) && mutationTokens.some((token) => normalized.includes(token));
+}
+
 function isRunnerBackedGoalRequest(request: string): boolean {
   const normalized = request.toLowerCase();
-  return [
+  return asksToMutateLocalFile(request) || [
     "implement",
     "code",
     "fix",
