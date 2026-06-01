@@ -1,11 +1,13 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { defaultStateRoot } from "../config.js";
+import { executionPlanArtifactName, executionPlanCapabilities, executionPlanRiskClass, executionPlanScope, hashExecutionPlan, readExecutionPlan, } from "../execution-plan.js";
+import { validateExecutionPlan } from "../schema/index.js";
 import { appendApprovalEntry } from "../state/approval-index.js";
 import { appendLineageRecord } from "../state/lineage.js";
 import { isRecoveryRunCancelled } from "../state/recovery.js";
 import { resolveRunIndexEntry } from "../state/run-index.js";
-const requiredArtifactNames = ["goal.json", "plan.md", "events.jsonl", "final.md"];
+const requiredArtifactNames = ["goal.json", "plan.md", executionPlanArtifactName, "events.jsonl", "final.md"];
 async function fileExists(path) {
     try {
         const result = await stat(path);
@@ -34,86 +36,6 @@ async function readGoalArtifact(path) {
         return undefined;
     }
 }
-function isPilotReceiptsDashboardRequest(request) {
-    const normalized = request.toLowerCase();
-    return normalized.includes("dashboard") && normalized.includes("receipt");
-}
-function hasLocalFileReference(request) {
-    return /(?:^|\s)(?:\/Users\/\S+|\/tmp\/\S+|\.{1,2}\/\S+|\S+\/\S+\.[A-Za-z0-9]{1,12})(?:\s|$|[.,;:!?")\]])/.test(request);
-}
-function asksToMutateLocalFile(request) {
-    const normalized = request.toLowerCase();
-    const mutationTokens = [
-        "create",
-        "write",
-        "save",
-        "generate",
-        "make",
-        "update",
-        "modify",
-        "edit",
-        "append",
-        "replace",
-        "touch",
-        "생성",
-        "작성",
-        "저장",
-        "수정",
-        "추가",
-        "교체",
-    ];
-    return hasLocalFileReference(request) && mutationTokens.some((token) => normalized.includes(token));
-}
-function isRunnerBackedGoalRequest(request) {
-    const normalized = request.toLowerCase();
-    return asksToMutateLocalFile(request) || [
-        "implement",
-        "code",
-        "fix",
-        "test",
-        "refactor",
-        "runner",
-        "codex",
-        "session",
-        "구현",
-        "수정",
-        "테스트",
-        "리팩터",
-    ].some((token) => normalized.includes(token));
-}
-function approvedExecutionBoundary(entry, goal) {
-    if (isPilotReceiptsDashboardRequest(goal.request)) {
-        return {
-            approved_scope: [
-                `Approved local dashboard prototype execution for Pilot plan run ${entry.short_run_id}.`,
-                "Create a self-contained local Pilot receipts dashboard inside the new goal run artifact directory.",
-                "Read local Pilot receipt artifacts as source data; do not mutate files outside the new goal run artifact directory.",
-            ],
-            approved_capabilities: ["create_pilot_receipts_dashboard"],
-            next_action: `Run /goal ${entry.short_run_id} to create the approved local Pilot receipts dashboard prototype.`,
-        };
-    }
-    if (isRunnerBackedGoalRequest(goal.request)) {
-        return {
-            approved_scope: [
-                `Approved Codex/session runner execution for Pilot plan run ${entry.short_run_id}.`,
-                "Execute the concrete work described in the approved plan.",
-                "Edit files, run checks, and collect results only within the approved plan boundary.",
-                "Stop and report if the runner discovers required work outside the approved plan.",
-            ],
-            approved_capabilities: ["run_codex_session"],
-            next_action: `Run /goal ${entry.short_run_id} to execute the approved Codex/session runner slice.`,
-        };
-    }
-    return {
-        approved_scope: [
-            `Approved local scoped execution for Pilot plan run ${entry.short_run_id}.`,
-            "Create local Pilot goal artifacts only.",
-        ],
-        approved_capabilities: ["create_artifact"],
-        next_action: `Run /goal ${entry.short_run_id} to execute the approved local scoped artifact flow.`,
-    };
-}
 function metadataString(metadata, key) {
     const value = metadata?.[key];
     if (value === undefined || value === null)
@@ -122,7 +44,23 @@ function metadataString(metadata, key) {
     return text || undefined;
 }
 async function recordApproval(stateRoot, reference, entry, goal, metadata) {
-    const boundary = approvedExecutionBoundary(entry, goal);
+    const executionPlanPath = join(entry.artifact_dir, executionPlanArtifactName);
+    const executionPlan = await readExecutionPlan(executionPlanPath);
+    const validationErrors = validateExecutionPlan(executionPlan);
+    if (executionPlan.plan_run_id !== entry.run_id) {
+        validationErrors.push(`execution plan run_id does not match approval target: ${entry.run_id}`);
+    }
+    const executionPlanHash = hashExecutionPlan(executionPlan);
+    if (executionPlanHash !== executionPlan.approval_subject_hash) {
+        validationErrors.push("execution plan hash does not match approval subject");
+    }
+    if (validationErrors.length > 0) {
+        throw new Error(`execution plan is not approvable: ${validationErrors.join("; ")}`);
+    }
+    const approvedScope = executionPlanScope(executionPlan);
+    const approvedCapabilities = executionPlanCapabilities(executionPlan);
+    const riskClass = executionPlanRiskClass(executionPlan);
+    const nextAction = `Run /goal ${entry.short_run_id} from the approved execution_plan (${executionPlanHash.slice(0, 12)}).`;
     const createdAt = new Date().toISOString();
     const approval = {
         schema_version: "pilot.approval.v0",
@@ -137,9 +75,11 @@ async function recordApproval(stateRoot, reference, entry, goal, metadata) {
         short_run_id: entry.short_run_id,
         artifact_dir: entry.artifact_dir,
         status: "approved",
-        approved_scope: boundary.approved_scope,
-        approved_capabilities: boundary.approved_capabilities,
-        next_action: boundary.next_action,
+        approved_scope: approvedScope,
+        approved_capabilities: approvedCapabilities,
+        execution_plan_ref: executionPlanPath,
+        execution_plan_hash: executionPlanHash,
+        next_action: nextAction,
     };
     const approvalPath = await appendApprovalEntry(stateRoot, approval);
     const lineage = await appendLineageRecord(stateRoot, {
@@ -154,10 +94,12 @@ async function recordApproval(stateRoot, reference, entry, goal, metadata) {
         artifact_dir: entry.artifact_dir,
         evidence_pointers: [...requiredArtifactNames.map((name) => join(entry.artifact_dir, name)), approvalPath],
         receipt_pointers: [approvalPath],
-        resume_hint: boundary.next_action,
+        resume_hint: nextAction,
         metadata: {
             reference,
-            approved_capabilities: boundary.approved_capabilities.join(","),
+            execution_plan_hash: executionPlanHash,
+            execution_capabilities: approvedCapabilities.join(","),
+            execution_risk_class: riskClass,
         },
     });
     return [approvalPath, lineage.run_path];
@@ -210,6 +152,18 @@ export async function resolveApprovalTarget(options) {
         }
         if (goal.status !== "completed_plan") {
             validationRisks.push(`Plan run is not ready for approval resolution: ${goal.status}.`);
+        }
+    }
+    if (missingArtifacts.length === 0) {
+        try {
+            const executionPlan = await readExecutionPlan(join(entry.artifact_dir, executionPlanArtifactName));
+            validationRisks.push(...validateExecutionPlan(executionPlan));
+            if (executionPlan.plan_run_id !== entry.run_id) {
+                validationRisks.push(`execution plan run_id does not match approval target: ${entry.run_id}`);
+            }
+        }
+        catch {
+            validationRisks.push("execution-plan.json is missing or not a valid Pilot execution plan artifact.");
         }
     }
     if (validationRisks.length > 0) {

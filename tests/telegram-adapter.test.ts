@@ -35,7 +35,11 @@ test("Telegram adapter routes authorized enabled plan messages", async () => {
     assert.equal(result.route?.command, "/plan");
     assert.match(result.telegram_text, /Status: plan_created/);
     assert.match(result.telegram_text, /Run: \d{6}/);
+    assert.match(result.telegram_text, /Approval/);
+    assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
+    assert.match(result.telegram_text, /Capabilities: create_artifact/);
     assert.match(result.telegram_text, /Next: Review the plan. To continue, reply "approve /);
+    assert.ok(result.telegram_text.indexOf("Approval") < result.telegram_text.indexOf("Evidence"));
     assert.ok(result.telegram_text.length < 4000);
     assert.deepEqual(result.command_result?.metadata, {
       channel: "telegram",
@@ -136,6 +140,8 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     assert.equal(result.route?.command, "/goal");
     assert.equal(result.route?.user_report.status, "goal_plan_created");
     assert.match(result.telegram_text, /Status: goal_plan_created/);
+    assert.match(result.telegram_text, /Approval/);
+    assert.match(result.telegram_text, /Plan hash: [a-f0-9]{12}/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /approve \d{6}/);
 

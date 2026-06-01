@@ -130,7 +130,8 @@ export function renderConvMarkdown(result) {
     ].join("\n");
 }
 export function renderGoalRunMarkdown(result) {
-    const executionBoundary = result.request.preflight.typed_capabilities.includes("run_codex_session")
+    const executionCapabilities = result.request.execution_plan?.steps.map((step) => step.capability) || [];
+    const executionBoundary = executionCapabilities.includes("run_codex_session")
         ? "Execution boundary: approved Codex/session runner only. Stop required for actions outside the approved plan."
         : "Execution boundary: scoped local goal artifacts only. No Telegram routing, external action, agent spawn, or dangerous action.";
     const lifecycle = result.lifecycle;

@@ -75,6 +75,7 @@ function formatRouteReply(route: RouteResult): string {
     `Command: ${route.command}`,
     ...(runId ? [`Run: ${shortRunId || runId}`, ...(shortRunId ? [`Run ID: ${runId}`] : [])] : []),
     ...(usage ? ["", "Usage", `- ${usage}`, ...(example ? ["", "Example", `- ${example}`] : [])] : []),
+    ...(report.approval_preview?.length ? ["", "Approval", ...bulletLines(report.approval_preview)] : []),
     "",
     "Evidence",
     ...bulletLines(report.evidence_pointers),

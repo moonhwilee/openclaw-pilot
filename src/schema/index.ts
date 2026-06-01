@@ -1,7 +1,8 @@
 import { isPhase1TerminalStatus } from "../state/index.ts";
+import { hashExecutionPlan } from "../execution-plan.ts";
 import { isSupportedProfile } from "../profiles/index.ts";
 import { goalCapabilityNames } from "../goal/capabilities.ts";
-import type { CommonPlanContract, ConvRequest, EventRecord, EvidencePacket, GoalArtifact, GoalRequest } from "../types.ts";
+import type { CommonPlanContract, ConvRequest, EventRecord, EvidencePacket, ExecutionPlan, GoalArtifact, GoalRequest } from "../types.ts";
 
 const broadActionGrants = [
   "use tools",
@@ -196,6 +197,58 @@ export function validateConvRequest(request: ConvRequest): string[] {
   return errors;
 }
 
+export function validateExecutionPlan(plan: ExecutionPlan): string[] {
+  const errors: string[] = [];
+
+  if (plan.schema_version !== "pilot.execution_plan.v0") errors.push("invalid execution plan schema version");
+  if (!plan.plan_run_id?.trim()) errors.push("missing execution plan run id");
+  if (!plan.approval_subject_hash?.trim()) errors.push("missing approval subject hash");
+  if (!plan.goal_summary?.trim()) errors.push("missing execution goal summary");
+  if (!Array.isArray(plan.steps) || plan.steps.length === 0) errors.push("missing execution steps");
+  if (!Array.isArray(plan.forbidden_actions)) errors.push("missing forbidden actions");
+  if (!Array.isArray(plan.requires_reapproval_if)) errors.push("missing reapproval triggers");
+
+  const calculatedHash = hashExecutionPlan(plan);
+  if (plan.approval_subject_hash && plan.approval_subject_hash !== calculatedHash) {
+    errors.push("execution plan hash mismatch");
+  }
+
+  const stepIds = new Set<string>();
+  for (const step of plan.steps || []) {
+    if (!step.id?.trim()) errors.push("missing execution step id");
+    if (step.id && stepIds.has(step.id)) errors.push(`duplicate execution step id: ${step.id}`);
+    if (step.id) stepIds.add(step.id);
+    if (!safeGoalCapabilities.has(step.capability)) errors.push(`unsupported execution capability: ${step.capability || "unknown"}`);
+    if (isDangerousCapability(step.capability || "")) errors.push(`dangerous execution capability: ${step.capability || "unknown"}`);
+    if (!["low", "medium", "high"].includes(step.risk_class)) errors.push(`invalid execution risk class: ${step.id || "unknown"}`);
+    if (!Array.isArray(step.scope) || step.scope.length === 0) errors.push(`missing execution scope: ${step.id || "unknown"}`);
+    if (!step.inputs || typeof step.inputs !== "object" || Array.isArray(step.inputs)) {
+      errors.push(`invalid execution inputs: ${step.id || "unknown"}`);
+    }
+    if (!Array.isArray(step.expected_artifacts) || step.expected_artifacts.length === 0) {
+      errors.push(`missing expected artifacts: ${step.id || "unknown"}`);
+    }
+    if (!Array.isArray(step.verification_gates) || step.verification_gates.length === 0) {
+      errors.push(`missing verification gates: ${step.id || "unknown"}`);
+    }
+    if (!Array.isArray(step.stop_conditions) || step.stop_conditions.length === 0) {
+      errors.push(`missing stop conditions: ${step.id || "unknown"}`);
+    }
+
+    const broadScope = hasBroadGrant(step.scope || []);
+    if (broadScope) errors.push(`overbroad execution scope: ${broadScope}`);
+  }
+
+  for (const action of plan.forbidden_actions || []) {
+    if (isBroadActionGrant(action)) errors.push(`overbroad forbidden action: ${action}`);
+  }
+  for (const trigger of plan.requires_reapproval_if || []) {
+    if (isBroadActionGrant(trigger)) errors.push(`overbroad reapproval trigger: ${trigger}`);
+  }
+
+  return errors;
+}
+
 export function validateGoalRequest(request: GoalRequest): string[] {
   const errors: string[] = [];
 
@@ -210,6 +263,14 @@ export function validateGoalRequest(request: GoalRequest): string[] {
     errors.push(...validateCommonPlanContract(request.plan));
     const broadApproval = hasBroadGrant(request.plan.action_boundaries.approval_required_actions);
     if (broadApproval) errors.push(`overbroad approval boundary: ${broadApproval}`);
+  }
+
+  const executionPlan = request.execution_plan;
+  if (executionPlan) {
+    errors.push(...validateExecutionPlan(executionPlan));
+    if (executionPlan.plan_run_id !== request.approval?.reference && request.approval?.approved) {
+      errors.push("execution plan run id does not match approval reference");
+    }
   }
 
   const preflight = request.preflight;
@@ -239,6 +300,13 @@ export function validateGoalRequest(request: GoalRequest): string[] {
   const approval = request.approval;
   if (!approval) return errors;
 
+  if (!executionPlan) errors.push("approved goal requires execution plan");
+  if (!approval.execution_plan_ref?.trim()) errors.push("missing approved execution plan ref");
+  if (!approval.execution_plan_hash?.trim()) errors.push("missing approved execution plan hash");
+  if (executionPlan && approval.execution_plan_hash && approval.execution_plan_hash !== executionPlan.approval_subject_hash) {
+    errors.push("approved execution plan hash mismatch");
+  }
+
   if (!approval.reference?.trim()) errors.push("missing approval reference");
   if (typeof approval.approved !== "boolean") errors.push("invalid approval flag");
   if (!Array.isArray(approval.approved_scope) || approval.approved_scope.length === 0) errors.push("missing approved scope");
@@ -252,8 +320,8 @@ export function validateGoalRequest(request: GoalRequest): string[] {
   if (broadApprovedCapability) errors.push(`overbroad approved capability: ${broadApprovedCapability}`);
 
   for (const capability of approval.approved_capabilities || []) {
-    if (!preflight.typed_capabilities.includes(capability)) {
-      errors.push(`approved capability is outside typed capability list: ${capability}`);
+    if (executionPlan && !executionPlan.steps.some((step) => step.capability === capability)) {
+      errors.push(`approved capability is outside execution plan: ${capability}`);
     }
     if (isDangerousCapability(capability)) errors.push(`dangerous approved capability: ${capability}`);
   }

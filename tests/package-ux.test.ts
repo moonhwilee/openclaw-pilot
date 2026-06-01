@@ -64,6 +64,7 @@ test("smoke checks package defaults", async () => {
 
   assert.equal(result.status, "ok");
   assert.ok(result.checks.some((check) => check.name === "plan" && check.status === "ok"));
+  assert.ok(result.checks.some((check) => check.name === "execution_plan_contract" && check.status === "ok"));
   assert.ok(result.checks.some((check) => check.name === "live_adapter" && check.status === "ok"));
 });
 

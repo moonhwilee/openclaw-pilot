@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { createRunId, eventLine, prepareRunDirectory, renderGoalRunMarkdown, writeJson } from "../artifacts.js";
 import { defaultStateRoot } from "../config.js";
 import { runConv } from "../conv/run.js";
+import { executionPlanCapabilities } from "../execution-plan.js";
 import { validateGoalRequest } from "../schema/index.js";
 import { appendLineageRecord } from "../state/lineage.js";
 import { shortRunId } from "../state/run-index.js";
@@ -13,11 +14,12 @@ import { buildPostConvergenceEvidencePacket, buildPostExecutionConvRequest, buil
 function needsPlanSemantics(request) {
     return request.plan.ambiguity_questions !== undefined && request.plan.ambiguity_questions.length > 0;
 }
-function approvalCoversCapabilities(request) {
+function approvalCoversExecutionPlan(request) {
     if (!request.approval?.approved)
         return false;
-    const approved = new Set(request.approval.approved_capabilities);
-    return request.preflight.typed_capabilities.every((capability) => approved.has(capability));
+    if (!request.execution_plan)
+        return false;
+    return request.approval.execution_plan_hash === request.execution_plan.approval_subject_hash;
 }
 function collectPreExecutionFindings(request, validationErrors) {
     const findings = validationErrors.map((message) => ({
@@ -41,10 +43,10 @@ function collectPreExecutionFindings(request, validationErrors) {
             severity: "warning",
         });
     }
-    else if (!approvalCoversCapabilities(request)) {
+    else if (!approvalCoversExecutionPlan(request)) {
         findings.push({
             code: "approval_scope_mismatch",
-            message: "Approved capabilities do not cover the typed execution capability list.",
+            message: "Approval does not cover the attached execution_plan hash.",
             severity: "error",
         });
     }
@@ -111,13 +113,13 @@ export async function runGoal(options) {
     ];
     let status = chooseStatus(findings);
     if (status === "completed") {
-        for (const capability of request.preflight.typed_capabilities) {
-            const runner = getGoalCapabilityRunner(capability);
+        for (const executionStep of request.execution_plan?.steps || []) {
+            const runner = getGoalCapabilityRunner(executionStep.capability);
             if (!runner) {
                 status = "blocked";
                 findings.push({
                     code: "goal_capability_runner_missing",
-                    message: `No runner is registered for approved goal capability: ${capability}.`,
+                    message: `No runner is registered for approved execution step capability: ${executionStep.capability}.`,
                     severity: "error",
                 });
                 events.push({
@@ -125,7 +127,7 @@ export async function runGoal(options) {
                     run_id: runId,
                     event: "goal_capability_runner_missing",
                     status: "error",
-                    details: { capability },
+                    details: { capability: executionStep.capability, execution_step_id: executionStep.id },
                 });
                 break;
             }
@@ -146,7 +148,7 @@ export async function runGoal(options) {
                 }
                 findings.push({
                     code: "goal_capability_runner_failed",
-                    message: `Goal capability ${capability} failed: ${message}`,
+                    message: `Goal execution step ${executionStep.id} (${executionStep.capability}) failed: ${message}`,
                     severity: "error",
                 });
                 events.push({
@@ -154,12 +156,18 @@ export async function runGoal(options) {
                     run_id: runId,
                     event: "goal_capability_runner_failed",
                     status: "error",
-                    details: { capability, message, artifact_path: typeof artifactPath === "string" ? artifactPath : undefined },
+                    details: {
+                        capability: executionStep.capability,
+                        execution_step_id: executionStep.id,
+                        message,
+                        artifact_path: typeof artifactPath === "string" ? artifactPath : undefined,
+                    },
                 });
                 break;
             }
             steps.push({
                 step: stepNumber,
+                execution_step_id: executionStep.id,
                 capability: execution.capability,
                 action_summary: execution.action_summary,
                 artifact_path: execution.artifact_path,
@@ -172,12 +180,13 @@ export async function runGoal(options) {
                 capability: execution.capability,
                 run_id: runId,
                 step: stepNumber,
+                execution_step_id: executionStep.id,
                 artifact_path: execution.artifact_path,
                 status: "ok",
-                scope: request.approval?.approved_scope,
+                scope: executionStep.scope,
                 actor: "pilot.local",
                 timestamp: createdAt,
-                risk_class: request.preflight.risk_class,
+                risk_class: executionStep.risk_class,
                 approval_reference: request.approval?.reference,
                 primary_proof: stepNumber === 1,
             });
@@ -188,6 +197,7 @@ export async function runGoal(options) {
                 status: "ok",
                 details: {
                     capability: execution.capability,
+                    execution_step_id: executionStep.id,
                     approval_reference: request.approval?.reference,
                     ...execution.event_details,
                 },
@@ -210,7 +220,7 @@ export async function runGoal(options) {
                 status = "needs_evidence";
                 findings.push({
                     code: "goal_artifact_missing_after_execution",
-                    message: `Goal artifact was expected but was not found after executing ${capability}.`,
+                    message: `Goal artifact was expected but was not found after executing ${executionStep.capability}.`,
                     severity: "error",
                 });
                 break;
@@ -425,7 +435,8 @@ export async function runGoal(options) {
                 ? "Approve the concrete plan before execution."
                 : "Resolve the listed approval, evidence, scope, or runner issue before retrying /goal.",
         metadata: {
-            capabilities: request.preflight.typed_capabilities.join(","),
+            capabilities: request.execution_plan ? executionPlanCapabilities(request.execution_plan).join(",") : "",
+            execution_plan_hash: request.execution_plan?.approval_subject_hash || "",
             risk_class: request.preflight.risk_class,
             steps: String(steps.length),
         },

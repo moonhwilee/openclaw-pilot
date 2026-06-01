@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { hashExecutionPlan, withExecutionPlanHash } from "../src/execution-plan.ts";
 import { runPlan } from "../src/plan/run.ts";
 import { runRoute } from "../src/route/run.ts";
 import { runGoal } from "../src/goal/run.ts";
@@ -28,15 +29,44 @@ async function convergenceGoalRequest(root: string, id: string): Promise<string>
     "receipts.jsonl records execution when approved",
     "convergence note exists for post-execution gaps",
   ];
+  request.execution_plan = withExecutionPlanHash({
+    ...(request.execution_plan || {
+      schema_version: "pilot.execution_plan.v0" as const,
+      goal_summary: request.goal.statement,
+      steps: [],
+      forbidden_actions: [],
+      requires_reapproval_if: [],
+    }),
+    plan_run_id: `${id}-approval`,
+  });
   request.approval = {
     reference: `${id}-approval`,
     approved: true,
     approved_scope: ["Create one local artifact in the run directory."],
     approved_capabilities: ["create_artifact"],
+    execution_plan_ref: "fixture-execution-plan.json",
+    execution_plan_hash: request.execution_plan.approval_subject_hash,
   };
   const requestPath = join(root, `${id}.json`);
   await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, "utf8");
   return requestPath;
+}
+
+async function planExecutionApprovalFields(artifactDir: string): Promise<{
+  execution_plan_ref: string;
+  execution_plan_hash: string;
+  approved_capabilities: string[];
+  approved_scope: string[];
+}> {
+  const executionPlanPath = join(artifactDir, "execution-plan.json");
+  const executionPlan = JSON.parse(await readFile(executionPlanPath, "utf8")) as GoalRequest["execution_plan"];
+  if (!executionPlan) throw new Error("missing test execution plan");
+  return {
+    execution_plan_ref: executionPlanPath,
+    execution_plan_hash: hashExecutionPlan(executionPlan),
+    approved_capabilities: executionPlan.steps.map((step) => step.capability),
+    approved_scope: executionPlan.steps.flatMap((step) => step.scope),
+  };
 }
 
 function standaloneConvRequest(anchorPath: string): ConvRequest {
@@ -365,6 +395,7 @@ test("resume auto-runs approved runner work from the execute checkpoint", async 
       artifact_dir: plan.artifact_dir,
       next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
     });
+    const approvalFields = await planExecutionApprovalFields(plan.artifact_dir);
     await appendApprovalEntry(stateRoot, {
       schema_version: "pilot.approval.v0",
       created_at: new Date("2026-06-01T00:00:01.000Z").toISOString(),
@@ -378,11 +409,10 @@ test("resume auto-runs approved runner work from the execute checkpoint", async 
       short_run_id: shortId,
       artifact_dir: plan.artifact_dir,
       status: "approved",
-      approved_scope: [
-        `Approved Codex/session runner execution for Pilot plan run ${shortId}.`,
-        "Execute the concrete work described in the approved plan.",
-      ],
-      approved_capabilities: ["run_codex_session"],
+      approved_scope: approvalFields.approved_scope,
+      approved_capabilities: approvalFields.approved_capabilities,
+      execution_plan_ref: approvalFields.execution_plan_ref,
+      execution_plan_hash: approvalFields.execution_plan_hash,
       next_action: `Run /goal ${shortId} to execute the approved Codex/session runner slice.`,
     });
     await appendLineageRecord(stateRoot, {
@@ -398,7 +428,7 @@ test("resume auto-runs approved runner work from the execute checkpoint", async 
       evidence_pointers: [],
       receipt_pointers: [],
       resume_hint: `Run /goal ${shortId} to execute the approved Codex/session runner slice.`,
-      metadata: { approved_capabilities: "run_codex_session" },
+      metadata: { execution_plan_hash: approvalFields.execution_plan_hash },
     });
 
     const output = await runRoute({
@@ -471,6 +501,7 @@ test("resume auto-runs verification from the verify checkpoint without re-execut
       artifact_dir: plan.artifact_dir,
       next_action: `Review the plan. To continue, reply "approve ${planShortId}".`,
     });
+    const approvalFields = await planExecutionApprovalFields(plan.artifact_dir);
     await appendApprovalEntry(stateRoot, {
       schema_version: "pilot.approval.v0",
       created_at: new Date("2026-06-01T00:00:01.000Z").toISOString(),
@@ -484,15 +515,14 @@ test("resume auto-runs verification from the verify checkpoint without re-execut
       short_run_id: planShortId,
       artifact_dir: plan.artifact_dir,
       status: "approved",
-      approved_scope: [
-        `Approved Codex/session runner execution for Pilot plan run ${planShortId}.`,
-        "Execute the concrete work described in the approved plan.",
-      ],
-      approved_capabilities: ["run_codex_session"],
+      approved_scope: approvalFields.approved_scope,
+      approved_capabilities: approvalFields.approved_capabilities,
+      execution_plan_ref: approvalFields.execution_plan_ref,
+      execution_plan_hash: approvalFields.execution_plan_hash,
       next_action: `Run /goal ${planShortId} to execute the approved Codex/session runner slice.`,
     });
 
-    const approvedRequestPath = join(plan.artifact_dir, "approved-goal-request.json");
+    const approvedRequestPath = join(plan.artifact_dir, "approved-execution-request.json");
     const approved = await runRoute({ input: `approve ${planShortId}`, enabled: true });
     assert.equal(approved.status, "routed");
 
@@ -795,9 +825,57 @@ test("approve route resolves, records, and executes a scoped receipt run", async
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("index/approvals.jsonl")));
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("receipts.jsonl")));
     assert.ok(plan.created_files.length > 0);
-    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-goal-request.json"), "utf8"));
+    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-execution-request.json"), "utf8"));
     assert.equal(approvedRequest.approval.reference, plan.run_id);
     assert.deepEqual(approvedRequest.approval.approved_capabilities, ["create_artifact"]);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("approve route blocks tampered execution plans before recording approval", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const plan = await runPlan({ request: "Draft a local approval tamper test plan." });
+    const shortId = shortRunId(plan.run_id);
+    await appendRunIndexEntry(stateRoot, {
+      schema_version: "pilot.run_index.v0",
+      created_at: new Date("2026-06-01T00:00:00.000Z").toISOString(),
+      channel: "telegram",
+      chat_id: "343580315",
+      sender_id: "343580315",
+      source_message_id: "23096",
+      source_update_id: "23096",
+      command: "/plan",
+      run_id: plan.run_id,
+      short_run_id: shortId,
+      status: "plan_created",
+      artifact_dir: plan.artifact_dir,
+      next_action: `Review the plan. To continue, reply "approve ${shortId}".`,
+    });
+
+    const executionPlanPath = join(plan.artifact_dir, "execution-plan.json");
+    const executionPlan = JSON.parse(await readFile(executionPlanPath, "utf8")) as Record<string, unknown>;
+    executionPlan.goal_summary = "tampered after planning";
+    await writeFile(executionPlanPath, `${JSON.stringify(executionPlan, null, 2)}\n`, "utf8");
+
+    const output = await runRoute({
+      input: `approve ${shortId}`,
+      enabled: true,
+      metadata: { channel: "telegram", chat_id: "343580315", sender_id: "343580315", message_id: "23097" },
+    });
+
+    assert.equal(output.status, "blocked");
+    assert.equal(output.user_report.status, "approval_target_invalid");
+    assert.ok(output.user_report.remaining_risks.some((risk) => risk.includes("execution plan hash mismatch")));
+    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("execution-plan.json")));
+    await assert.rejects(readFile(join(plan.artifact_dir, "approved-execution-request.json"), "utf8"));
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
@@ -842,7 +920,7 @@ test("approve route creates a Pilot receipts dashboard for dashboard receipt goa
     assert.equal(output.status, "routed");
     assert.equal(output.user_report.status, "completed_verified");
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("pilot-receipts-dashboard.html")));
-    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-goal-request.json"), "utf8"));
+    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-execution-request.json"), "utf8"));
     assert.deepEqual(approvedRequest.approval.approved_capabilities, ["create_pilot_receipts_dashboard"]);
     assert.deepEqual(approvedRequest.preflight.typed_capabilities, ["create_pilot_receipts_dashboard"]);
   } finally {
@@ -906,7 +984,7 @@ test("approve route connects an implementation goal to the approved session runn
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-stdout.txt")));
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("post-execution-evidence.json")));
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("verification.json")));
-    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-goal-request.json"), "utf8"));
+    const approvedRequest = JSON.parse(await readFile(join(plan.artifact_dir, "approved-execution-request.json"), "utf8"));
     assert.deepEqual(approvedRequest.approval.approved_capabilities, ["run_codex_session"]);
     assert.equal(approvedRequest.preflight.risk_class, "high");
   } finally {
@@ -1002,8 +1080,8 @@ test("approve route executes freeform local file creation goals through the sess
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-result.json")));
     assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("runner-stdout.txt")));
     assert.equal(await readFile(targetPath, "utf8"), "pilot e2e smoke ok\n");
-    const approvedRequest = JSON.parse(await readFile(join(artifactDir, "approved-goal-request.json"), "utf8"));
-    assert.match(approvedRequest.goal.statement, /Execute approved Codex\/session work/);
+    const approvedRequest = JSON.parse(await readFile(join(artifactDir, "approved-execution-request.json"), "utf8"));
+    assert.match(approvedRequest.goal.statement, /Execute approved execution_plan/);
     assert.ok(approvedRequest.goal.statement.includes(prompt));
     assert.deepEqual(approvedRequest.approval.approved_capabilities, ["run_codex_session"]);
     assert.equal(approvedRequest.preflight.risk_class, "high");

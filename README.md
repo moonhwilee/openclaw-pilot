@@ -36,7 +36,7 @@ Current scope:
 
 - `pilot init` creates a minimal `pilot.config.json` and default state directories.
 - `pilot doctor` reports package/config/state health in a user-friendly way.
-- `pilot smoke` runs a quick maintainer/CI health check over the shipped fixtures.
+- `pilot smoke` runs a quick maintainer/CI health check over the shipped fixtures, including the typed `execution-plan.json` contract/hash check.
 - `pilot plan <request>` creates local plan artifacts only.
 - `pilot verify <evidence-packet.json>` evaluates a supplied evidence packet only.
 - `pilot conv <conv-request.json>` reduces bounded findings around an anchor using local artifact updates only.
@@ -53,10 +53,11 @@ Current scope:
 - If automatic post-execution verification returns fixable findings, approved goal execution can write `post-execution-conv-request.json`, run bounded local `/conv`, write `post-convergence-evidence.json`, and re-run deterministic `/verify`.
 - Approved goal results include a lifecycle summary with user-visible statuses such as `completed_verified`, `completed_after_convergence`, `completed_with_risks`, `needs_user_decision`, and `blocked`, plus phase markers for execution, verification, convergence, re-verification, and reporting.
 - Package API exports `runGatewayBridge()` from `openclaw-pilot/gateway` for a disabled-by-default OpenClaw Gateway bridge.
-- Plan artifacts: `goal.json`, `plan.md`, `events.jsonl`, and `final.md`.
+- Plan artifacts: `goal.json`, `plan.md`, `execution-plan.json`, `events.jsonl`, and `final.md`. The human-readable plan is not the execution authority; approved execution uses the typed execution plan contract.
 - Verification artifacts: `verification.json`, `events.jsonl`, and `final.md`.
 - Convergence artifacts: `conv-request.json`, `conv-checkpoint.json`, `conv.json`, `receipts.jsonl`, `events.jsonl`, `final.md`, and local round evidence updates.
 - Goal artifacts: `goal-run.json`, `events.jsonl`, `final.md`, plus `receipts.jsonl`, `post-execution-evidence.json`, optional post-execution convergence artifacts, verification artifacts, lifecycle status, recovery directives such as `resume.json`, `resume-lock.json`, `auto-resume-attempt.json`, and step/runner artifacts only after scoped approval.
+- Approval artifacts use `approved-execution-request.json`, mechanically derived from the hash-validated `execution-plan.json`. Pilot does not execute from request prose, inferred keywords, or legacy `approved-goal-request.json` artifacts.
 - Shared lineage artifacts: each run appends `lineage.jsonl` in its artifact directory and `index/lineage.jsonl` in the state root so `/plan`, `/verify`, `/conv`, `/goal`, approval, and recovery records can be recovered with one common model.
 - By default the session runner is disabled. When enabled, it executes only the configured runner command under the approved plan and captures stdout/stderr/result artifacts.
 - Never sends external messages or owns Gateway lifecycle. Out-of-plan work must stop and be reported.

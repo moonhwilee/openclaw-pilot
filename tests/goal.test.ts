@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { withExecutionPlanHash } from "../src/execution-plan.ts";
 import { getGoalCapabilityRunner, goalCapabilityNames } from "../src/goal/capabilities.ts";
 import { runGoal } from "../src/goal/run.ts";
 import { validateGoalRequest } from "../src/schema/index.ts";
@@ -58,6 +59,54 @@ function baseGoalRequest(): GoalRequest {
   };
 }
 
+function applyExecutionPlan(
+  request: GoalRequest,
+  options: {
+    reference: string;
+    capability?: string;
+    scope?: string[];
+    riskClass?: "low" | "medium" | "high";
+  },
+): void {
+  const capability = options.capability || request.preflight.typed_capabilities[0] || "create_artifact";
+  const scope = options.scope || ["Create one local artifact in the run directory."];
+  const riskClass = options.riskClass || request.preflight.risk_class;
+  request.preflight.risk_class = riskClass;
+  request.preflight.typed_capabilities = [capability];
+  request.execution_plan = withExecutionPlanHash({
+    schema_version: "pilot.execution_plan.v0",
+    plan_run_id: options.reference,
+    goal_summary: request.goal.statement,
+    steps: [
+      {
+        id: "step-1",
+        capability,
+        risk_class: riskClass,
+        scope,
+        inputs: { fixture: true },
+        expected_artifacts:
+          capability === "run_codex_session"
+            ? ["runner-result.json", "runner-stdout.txt", "runner-stderr.txt"]
+            : capability === "create_pilot_receipts_dashboard"
+              ? ["pilot-receipts-dashboard.html"]
+              : ["step-1-goal-artifact.md"],
+        verification_gates: ["goal-run.json exists", "receipts.jsonl records execution"],
+        stop_conditions: ["success_criteria_met", "approval_boundary_hit"],
+      },
+    ],
+    forbidden_actions: ["external_message", "payment", "credential_access", "server_restart", "deploy"],
+    requires_reapproval_if: ["Execution requires a capability, scope, or risk class outside this execution plan."],
+  });
+  request.approval = {
+    reference: options.reference,
+    approved: true,
+    approved_scope: scope,
+    approved_capabilities: [capability],
+    execution_plan_ref: "fixture-execution-plan.json",
+    execution_plan_hash: request.execution_plan.approval_subject_hash,
+  };
+}
+
 test("pilot goal waits for scoped approval before execution", async () => {
   const root = await tempRoot("pilot-goal-");
   const stateRoot = await tempRoot("pilot-state-");
@@ -86,12 +135,7 @@ test("pilot goal executes approved low-risk scoped artifact capability", async (
   const root = await tempRoot("pilot-goal-");
   const stateRoot = await tempRoot("pilot-state-");
   const request = baseGoalRequest();
-  request.approval = {
-    reference: "approval-001",
-    approved: true,
-    approved_scope: ["Create one local artifact in the run directory."],
-    approved_capabilities: ["create_artifact"],
-  };
+  applyExecutionPlan(request, { reference: "approval-001" });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -114,9 +158,38 @@ test("pilot goal executes approved low-risk scoped artifact capability", async (
   assert.match(receipts, /"schema_version":"pilot.receipt.v0"/);
   assert.match(receipts, /"approval_reference":"approval-001"/);
   assert.match(receipts, /"capability":"create_artifact"/);
+  assert.match(receipts, /"execution_step_id":"step-1"/);
+  const postExecutionEvidence = await readFile(join(result.artifact_dir, "post-execution-evidence.json"), "utf8");
+  assert.match(postExecutionEvidence, /execution_step_id step-1/);
+  assert.match(postExecutionEvidence, /every receipt must include execution_step_id/);
   const lineage = await readFile(join(result.artifact_dir, "lineage.jsonl"), "utf8");
   assert.match(lineage, /"approval_reference":"approval-001"/);
   assert.match(lineage, /"receipt_pointers":/);
+});
+
+test("approved goal without execution_plan does not fallback to preflight capabilities", async () => {
+  const root = await tempRoot("pilot-goal-");
+  const stateRoot = await tempRoot("pilot-state-");
+  const request = baseGoalRequest();
+  request.approval = {
+    reference: "approval-missing-execution-plan",
+    approved: true,
+    approved_scope: ["Create one local artifact in the run directory."],
+    approved_capabilities: ["create_artifact"],
+  };
+  const requestPath = join(root, "goal.json");
+  await writeJson(requestPath, request);
+
+  const result = await runGoal({
+    requestPath,
+    stateRoot,
+    now: new Date("2026-06-01T00:00:00.000Z"),
+  });
+
+  assert.equal(result.status, "needs_user_decision");
+  assert.equal(result.steps.length, 0);
+  assert.equal(await fileExists(join(result.artifact_dir, "receipts.jsonl")), false);
+  assert.ok(result.findings.some((finding) => finding.message.includes("approved goal requires execution plan")));
 });
 
 test("pilot goal creates approved local Pilot receipts dashboard prototype", async () => {
@@ -144,12 +217,11 @@ test("pilot goal creates approved local Pilot receipts dashboard prototype", asy
   request.goal.statement = "Create a local Pilot receipts dashboard prototype.";
   request.plan.action_boundaries.allowed_actions = ["create_pilot_receipts_dashboard"];
   request.preflight.typed_capabilities = ["create_pilot_receipts_dashboard"];
-  request.approval = {
+  applyExecutionPlan(request, {
     reference: "approval-dashboard-001",
-    approved: true,
-    approved_scope: ["Create a local self-contained Pilot receipts dashboard in the goal run artifact directory."],
-    approved_capabilities: ["create_pilot_receipts_dashboard"],
-  };
+    capability: "create_pilot_receipts_dashboard",
+    scope: ["Create a local self-contained Pilot receipts dashboard in the goal run artifact directory."],
+  });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -177,12 +249,7 @@ test("goal capability registry stays aligned with executable schema capabilities
     const request = baseGoalRequest();
     request.plan.action_boundaries.allowed_actions = [capability];
     request.preflight.typed_capabilities = [capability];
-    request.approval = {
-      reference: `approval-${capability}`,
-      approved: true,
-      approved_scope: ["Create one local artifact in the run directory."],
-      approved_capabilities: [capability],
-    };
+    applyExecutionPlan(request, { reference: `approval-${capability}`, capability });
 
     assert.equal(typeof getGoalCapabilityRunner(capability), "function");
     assert.deepEqual(validateGoalRequest(request), []);
@@ -193,12 +260,7 @@ test("pilot goal rejects overbroad approval boundaries", async () => {
   const root = await tempRoot("pilot-goal-");
   const stateRoot = await tempRoot("pilot-state-");
   const request = baseGoalRequest();
-  request.approval = {
-    reference: "approval-002",
-    approved: true,
-    approved_scope: ["do whatever is needed"],
-    approved_capabilities: ["create_artifact"],
-  };
+  applyExecutionPlan(request, { reference: "approval-002", scope: ["do whatever is needed"] });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -218,12 +280,7 @@ test("pilot goal refuses dangerous or unsupported capabilities", async () => {
   const stateRoot = await tempRoot("pilot-state-");
   const request = baseGoalRequest();
   request.preflight.typed_capabilities = ["shell_escape"];
-  request.approval = {
-    reference: "approval-003",
-    approved: true,
-    approved_scope: ["Create one local artifact in the run directory."],
-    approved_capabilities: ["shell_escape"],
-  };
+  applyExecutionPlan(request, { reference: "approval-003", capability: "shell_escape" });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -243,12 +300,7 @@ test("pilot goal executes approved higher-risk goals when the concrete plan cove
   const stateRoot = await tempRoot("pilot-state-");
   const request = baseGoalRequest();
   request.preflight.risk_class = "high";
-  request.approval = {
-    reference: "approval-004",
-    approved: true,
-    approved_scope: ["Create one local artifact in the run directory."],
-    approved_capabilities: ["create_artifact"],
-  };
+  applyExecutionPlan(request, { reference: "approval-004", riskClass: "high" });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -284,12 +336,12 @@ test("pilot goal runs approved session runner vertical slice with recorded evide
   request.plan.action_boundaries.allowed_actions = ["run_codex_session"];
   request.plan.action_boundaries.approval_required_actions = ["execute the approved Codex/session runner task"];
   request.plan.verification_gates = ["runner-result.json exists", "runner-stdout.txt exists", "receipts.jsonl records execution"];
-  request.approval = {
+  applyExecutionPlan(request, {
     reference: "approval-runner-001",
-    approved: true,
-    approved_scope: ["Execute the approved runner task and report results."],
-    approved_capabilities: ["run_codex_session"],
-  };
+    capability: "run_codex_session",
+    scope: ["Execute the approved runner task and report results."],
+    riskClass: "high",
+  });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -352,12 +404,7 @@ test("pilot goal runs bounded post-execution conv and re-verifies fixable findin
     "receipts.jsonl records execution when approved",
     "convergence note exists for post-execution gaps",
   ];
-  request.approval = {
-    reference: "approval-conv-001",
-    approved: true,
-    approved_scope: ["Create one local artifact in the run directory."],
-    approved_capabilities: ["create_artifact"],
-  };
+  applyExecutionPlan(request, { reference: "approval-conv-001" });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 
@@ -396,12 +443,12 @@ test("pilot goal blocks approved session runner when runner env is disabled but 
   request.preflight.typed_capabilities = ["run_codex_session"];
   request.plan.action_boundaries.allowed_actions = ["run_codex_session"];
   request.plan.action_boundaries.approval_required_actions = ["execute the approved Codex/session runner task"];
-  request.approval = {
+  applyExecutionPlan(request, {
     reference: "approval-runner-disabled-001",
-    approved: true,
-    approved_scope: ["Execute the approved runner task and report results."],
-    approved_capabilities: ["run_codex_session"],
-  };
+    capability: "run_codex_session",
+    scope: ["Execute the approved runner task and report results."],
+    riskClass: "high",
+  });
   const requestPath = join(root, "goal.json");
   await writeJson(requestPath, request);
 

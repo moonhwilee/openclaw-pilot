@@ -205,6 +205,7 @@ export type TypedReceipt = {
   run_id: string;
   round?: number;
   step?: number;
+  execution_step_id?: string;
   artifact_path: string;
   status: "ok";
   scope?: string[];
@@ -258,6 +259,8 @@ export type GoalApproval = {
   approved: boolean;
   approved_scope: string[];
   approved_capabilities: string[];
+  execution_plan_ref?: string;
+  execution_plan_hash?: string;
 };
 
 export type GoalPreflight = {
@@ -266,6 +269,27 @@ export type GoalPreflight = {
   dangerous_action_gates: string[];
   receipt_required: boolean;
   max_rounds: number;
+  stop_conditions: string[];
+};
+
+export type ExecutionPlan = {
+  schema_version: "pilot.execution_plan.v0";
+  plan_run_id: string;
+  approval_subject_hash: string;
+  goal_summary: string;
+  steps: ExecutionStep[];
+  forbidden_actions: string[];
+  requires_reapproval_if: string[];
+};
+
+export type ExecutionStep = {
+  id: string;
+  capability: string;
+  risk_class: RiskClass;
+  scope: string[];
+  inputs: Record<string, unknown>;
+  expected_artifacts: string[];
+  verification_gates: string[];
   stop_conditions: string[];
 };
 
@@ -279,10 +303,12 @@ export type GoalRequest = {
   plan: CommonPlanContract;
   approval?: GoalApproval;
   preflight: GoalPreflight;
+  execution_plan?: ExecutionPlan;
 };
 
 export type GoalStep = {
   step: number;
+  execution_step_id?: string;
   capability: string;
   action_summary: string;
   artifact_path: string;
@@ -343,6 +369,7 @@ export type RouteCommand =
 
 export type RouteUserReport = {
   status: string;
+  approval_preview?: string[];
   evidence_pointers: string[];
   remaining_risks: string[];
   next_action: string;
@@ -379,6 +406,8 @@ export type PilotApprovalEntry = {
   status: "approved";
   approved_scope: string[];
   approved_capabilities: string[];
+  execution_plan_ref?: string;
+  execution_plan_hash?: string;
   next_action: string;
 };
 
