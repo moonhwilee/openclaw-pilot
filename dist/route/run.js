@@ -248,6 +248,60 @@ function targetNeedsRunReport(command, status, target, nextAction) {
         user_report: userReport(status, [], [target], nextAction),
     };
 }
+function versionScopesFromRequest(raw) {
+    return [...new Set((raw.match(/\bv?\d+\.\d+\.\d+\b/g) || []).map((version) => (version.startsWith("v") ? version : `v${version}`)))];
+}
+function isImplementationReviewRequest(raw) {
+    const normalized = raw.toLowerCase();
+    const versions = versionScopesFromRequest(raw);
+    return (versions.length >= 2 ||
+        /구현|업데이트|릴리스|release|오버엔지니어링|overengineering|legacy|fallback|no legacy|no fallback|원칙|놓친|잘못된|side effect|사이드/.test(normalized));
+}
+function implementationReviewPlanRequest(raw) {
+    const versions = versionScopesFromRequest(raw);
+    const scope = versions.length ? versions.join(", ") : raw;
+    return [
+        `Verify OpenClaw Pilot implementation quality for ${scope}.`,
+        `Original user request: ${raw}`,
+        "Collect concrete evidence before judging: release/tag or PR scope, changed files, tests, smoke checks, docs, rollout state, and Gateway/runtime side effects when relevant.",
+        "Review for wrong behavior, missed impact, overengineering, implementation-principle violations, especially no legacy backend, no fallback execution, and no request-prose execution.",
+        "Return findings with severity, evidence pointers, residual risk, and a clear pass/fail/needs-work judgment.",
+    ].join(" ");
+}
+async function verifyImplementationReviewPlanRoute(raw) {
+    const result = await runPlan({ request: implementationReviewPlanRequest(raw) });
+    const shortId = shortRunId(result.run_id);
+    const approvalPreview = result.status === "completed_plan" ? await readPlanApprovalPreview(result.artifact_dir, shortId, result.run_id) : [];
+    const versions = versionScopesFromRequest(raw);
+    return {
+        schema_version: "pilot.route.v0",
+        status: result.status === "completed_plan" ? "awaiting_approval" : "needs_user_decision",
+        command: "/verify",
+        enabled: true,
+        backend: "openclaw-pilot",
+        result_summary: {
+            status: "verify_plan_created",
+            run_id: result.run_id,
+            short_run_id: shortId,
+            state_root: result.goal.state_root,
+            artifact_dir: result.artifact_dir,
+            version_scope: versions,
+            created_files: result.created_files,
+            plan_preview: planPreview(result.plan),
+        },
+        user_report: userReport(result.status === "completed_plan" ? "verify_plan_created" : result.status, result.created_files, result.status === "needs_user_decision"
+            ? result.plan.ambiguity_questions || ["Verification plan requires a user decision before evidence collection."]
+            : [
+                "Implementation review has not run yet; this is the evidence-collection and review plan.",
+                "Approval is required before Pilot collects evidence or performs runner-backed review work.",
+            ], result.status === "needs_user_decision"
+            ? "Answer the ambiguity questions and rerun /verify."
+            : `Review the verification plan. To continue, reply "approve ${shortId}" or cite full run_id ${result.run_id}.`, approvalPreview, [
+            versions.length ? `Scope: ${versions.join(", ")}` : "Scope: natural implementation review request",
+            "Mode: implementation-quality verification plan",
+        ]),
+    };
+}
 function artifactShortcutDisabledReport(command, path) {
     const artifactCommand = command === "/verify"
         ? "pilot artifact verify <evidence-packet.json>"
@@ -323,6 +377,12 @@ async function resolveRunTarget(command, raw) {
         return { status: "needs_user_decision", route: artifactShortcutDisabledReport(command, target.path) };
     }
     if (target.kind === "natural_language") {
+        if (command === "/verify" && isImplementationReviewRequest(target.raw)) {
+            return {
+                status: "needs_user_decision",
+                route: await verifyImplementationReviewPlanRoute(target.raw),
+            };
+        }
         return {
             status: "needs_user_decision",
             route: targetNeedsRunReport(command, command === "/verify" ? "verify_needs_evidence" : "conv_needs_anchor_or_plan", target.raw, command === "/verify"

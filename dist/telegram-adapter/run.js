@@ -73,7 +73,7 @@ function metadataString(metadata, key) {
     return value || undefined;
 }
 async function recordRouteHandoff(route, metadata) {
-    if (route.command !== "/plan" && route.command !== "/goal")
+    if (route.command !== "/plan" && route.command !== "/goal" && route.command !== "/verify")
         return;
     const summary = route.result_summary || {};
     const runId = typeof summary.run_id === "string" ? summary.run_id : undefined;
@@ -81,8 +81,11 @@ async function recordRouteHandoff(route, metadata) {
     const stateRoot = typeof summary.state_root === "string" ? summary.state_root : undefined;
     if (!runId || !artifactDir || !stateRoot)
         return;
-    if (route.user_report.status !== "plan_created" && route.user_report.status !== "goal_plan_created")
+    if (route.user_report.status !== "plan_created" &&
+        route.user_report.status !== "goal_plan_created" &&
+        route.user_report.status !== "verify_plan_created") {
         return;
+    }
     const entry = {
         schema_version: "pilot.run_index.v0",
         created_at: new Date().toISOString(),
