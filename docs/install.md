@@ -34,12 +34,16 @@ pilot smoke
 
 `pilot doctor` checks Node, package metadata, local config, state directory access, and bundled fixtures.
 
-`pilot smoke` runs the bundled plan, verify, conv, route, goal-draft, and live-adapter checks against temporary state.
+`pilot smoke` runs the bundled plan, execution-plan contract, verify, conv, route, goal-draft, and live-adapter checks against temporary state. The execution-plan check reads the generated `execution-plan.json`, validates the schema, recomputes the canonical hash, and confirms the run id and typed steps.
 
 ## State And Lineage
 
 `PILOT_STATE_ROOT` can override where artifacts are written. By default Pilot
 stores state under the OpenClaw workspace state directory.
+
+Plan runs write `execution-plan.json` next to the human-readable plan. Approval
+and execution use that typed contract and hash; `plan.md` is user-facing
+context, not the executable authorization source.
 
 Each command writes its own artifacts and also appends a shared lineage record
 to `lineage.jsonl` in the run directory and `index/lineage.jsonl` under the
@@ -103,6 +107,10 @@ receipts. If verification returns fixable findings, Pilot can write
 `post-convergence-evidence.json`, and re-run deterministic `/verify`. If the
 runner needs work outside the approved plan, it must stop and report that
 boundary instead of silently expanding scope.
+
+Approved execution requests are written as `approved-execution-request.json`
+from the approved `execution-plan.json`. Pilot does not execute from request
+prose, keyword inference, or legacy `approved-goal-request.json` artifacts.
 
 Approved goal results also include a lifecycle summary. User-facing route and
 Telegram text now distinguish terminal states such as `completed_verified`,
