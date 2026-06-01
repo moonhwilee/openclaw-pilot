@@ -177,6 +177,7 @@ test("Telegram adapter records authorized freeform goal intake handoffs", async 
     assert.match(result.telegram_text, /Goal milestones: \d+ phases, \d+ slices/);
     assert.match(result.telegram_text, /Run: \d{6}/);
     assert.match(result.telegram_text, /approve \d{6}/);
+    assert.match(result.telegram_text, /Evidence\n- none/);
 
     const indexText = await readFile(join(process.env.PILOT_STATE_ROOT || "", "index", "runs.jsonl"), "utf8");
     const indexEntry = JSON.parse(indexText.trim());

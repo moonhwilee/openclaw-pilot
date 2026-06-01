@@ -334,7 +334,7 @@ async function commandModePlanRoute(mode, raw, anchor) {
             plan_preview: planPreview(result.plan),
             profile_expectations: profileExpectationSummary(result.goal.profile),
         },
-        user_report: userReport(visibleStatus, result.created_files, result.status === "needs_user_decision"
+        user_report: userReport(visibleStatus, [], result.status === "needs_user_decision"
             ? result.plan.ambiguity_questions || [`${planModeLabel(mode)} requires clarification before approval.`]
             : planModeCompletedRisks(mode), result.status === "needs_user_decision"
             ? `Answer the ambiguity questions and rerun ${command}.`

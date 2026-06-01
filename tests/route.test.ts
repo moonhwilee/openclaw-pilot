@@ -286,7 +286,8 @@ test("broad implementation /verify creates a command-mode review plan without a 
     assert.equal(verify.user_report.status, "verify_plan_created");
     assert.equal(verify.result_summary?.plan_mode, "verify");
     assert.match(verify.user_report.next_action, /approve \d{6}/);
-    assert.ok(verify.user_report.evidence_pointers.some((pointer) => pointer.endsWith("plan.md")));
+    assert.deepEqual(verify.user_report.evidence_pointers, []);
+    assert.ok((verify.result_summary?.created_files as string[]).some((pointer) => pointer.endsWith("plan.md")));
     assert.ok(verify.user_report.progress?.some((line) => line.includes("Router: command mode plus mechanical target only")));
     assert.equal(verify.result_summary?.version_scope, undefined);
     assert.doesNotMatch(JSON.stringify(verify), /sufficient_evidence|Findings: none|natural-verify-evidence-packet/);
@@ -382,7 +383,8 @@ test("/conv natural language target creates an approval-backed convergence plan"
     assert.equal(conv.command, "/conv");
     assert.equal(conv.user_report.status, "conv_plan_created");
     assert.equal(conv.result_summary?.plan_mode, "conv");
-    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("plan.md")));
+    assert.deepEqual(conv.user_report.evidence_pointers, []);
+    assert.ok((conv.result_summary?.created_files as string[]).some((path) => path.endsWith("plan.md")));
     assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
   } finally {
     if (previousStateRoot === undefined) {
@@ -421,7 +423,8 @@ test("broad natural /conv creates a convergence plan without silently binding to
     assert.equal(conv.status, "awaiting_approval");
     assert.equal(conv.user_report.status, "conv_plan_created");
     assert.equal(conv.result_summary?.plan_mode, "conv");
-    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("plan.md")));
+    assert.deepEqual(conv.user_report.evidence_pointers, []);
+    assert.ok((conv.result_summary?.created_files as string[]).some((path) => path.endsWith("plan.md")));
     assert.doesNotMatch(JSON.stringify(conv), /natural-conv-request\.json|conv\.json/);
   } finally {
     if (previousStateRoot === undefined) {
@@ -1423,7 +1426,8 @@ test("/goal freeform route creates a goal-intake plan without execution", async 
     assert.equal(output.result_summary?.plan_mode, "goal");
     assert.match(String(output.result_summary?.short_run_id || ""), /^\d{6}$/);
     assert.match(output.user_report.next_action, /approve \d{6}/);
-    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("goal.json")));
+    assert.deepEqual(output.user_report.evidence_pointers, []);
+    assert.ok((output.result_summary?.created_files as string[]).some((path) => path.endsWith("goal.json")));
     assert.ok(output.user_report.remaining_risks.some((risk) => risk.includes("Execution not performed")));
   } finally {
     if (previousStateRoot === undefined) {
@@ -1449,7 +1453,8 @@ test("/goal freeform route treats filesystem paths inside objectives as goal tex
     assert.equal(output.user_report.status, "goal_plan_created");
     assert.equal(output.result_summary?.plan_mode, "goal");
     assert.match(output.user_report.next_action, /approve \d{6}/);
-    assert.ok(output.user_report.evidence_pointers.some((path) => path.endsWith("goal.json")));
+    assert.deepEqual(output.user_report.evidence_pointers, []);
+    assert.ok((output.result_summary?.created_files as string[]).some((path) => path.endsWith("goal.json")));
   } finally {
     if (previousStateRoot === undefined) {
       delete process.env.PILOT_STATE_ROOT;
