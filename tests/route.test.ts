@@ -192,6 +192,168 @@ test("recovery list and status inspect recent Pilot runs without mutating execut
   }
 });
 
+test("status recent aliases resolve the newest Pilot run", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const older = await runPlan({ request: "Draft an older status alias smoke plan." });
+    const newer = await runPlan({ request: "Draft a newer status alias smoke plan." });
+
+    const status = await runRoute({ input: "status 최근 실행 보여줘", enabled: true });
+    assert.equal(status.status, "routed");
+    const run = status.result_summary?.run as { run_id?: string } | undefined;
+    assert.equal(run?.run_id, newer.run_id);
+    assert.notEqual(run?.run_id, older.run_id);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("approval and cancel recent aliases require explicit target confirmation", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const plan = await runPlan({ request: "Draft a recent safety alias smoke plan." });
+
+    const approve = await runRoute({ input: "approve recent", enabled: true });
+    assert.equal(approve.status, "needs_user_decision");
+    assert.equal(approve.user_report.status, "approval_recent_requires_explicit_target");
+    assert.match(approve.user_report.next_action, new RegExp(`approve ${plan.run_id}`));
+
+    const cancel = await runRoute({ input: "cancel recent", enabled: true });
+    assert.equal(cancel.status, "needs_user_decision");
+    assert.equal(cancel.user_report.status, "recovery_cancel_recent_requires_confirmation");
+    assert.match(cancel.user_report.next_action, new RegExp(`cancel ${plan.run_id}`));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/verify natural language target builds an internal evidence packet instead of treating prose as a path", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    await runPlan({ request: "Draft a natural verify target smoke plan." });
+
+    const verify = await runRoute({ input: "/verify 최근 plan 결과가 충분히 남았는지 검증해줘", enabled: true });
+
+    assert.equal(verify.status, "routed");
+    assert.equal(verify.command, "/verify");
+    assert.notEqual(verify.user_report.status, "advanced_artifact_path_missing");
+    assert.ok(verify.user_report.evidence_pointers.some((path) => path.endsWith("natural-verify-evidence-packet.json")));
+    assert.ok(verify.user_report.evidence_pointers.some((path) => path.endsWith("verification.json")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/verify missing JSON path returns natural-language-first guidance", async () => {
+  const stateRoot = await tempStateRoot();
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const verify = await runRoute({ input: "/verify artifacts/pilot/not-found-evidence-packet.json", enabled: true });
+
+    assert.equal(verify.status, "needs_user_decision");
+    assert.equal(verify.user_report.status, "advanced_artifact_path_missing");
+    assert.ok(verify.user_report.remaining_risks.some((risk) => risk.includes("Normal users can send a natural-language target")));
+    assert.match(verify.user_report.next_action, /\/verify 최근/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/conv natural language target builds an internal conv request from recent verification findings", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const packetPath = join(stateRoot, "missing-evidence-packet.json");
+    await writeFile(
+      packetPath,
+      `${JSON.stringify(
+        {
+          schema_version: "pilot.evidence.v0",
+          claim: {
+            id: "natural-conv-route",
+            statement: "Natural conv route should converge recent verification findings.",
+            profile: "document_strategy",
+          },
+          verdict_criteria: [
+            {
+              id: "evidence-present",
+              description: "At least one evidence item supports the claim.",
+              required: true,
+            },
+          ],
+          evidence: [],
+          reviewer_boundary: {
+            semantic_review_required: false,
+            deterministic_checks_only: true,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    const verification = await runVerify({ packetPath, stateRoot });
+    assert.equal(verification.verdict, "missing_evidence");
+
+    const conv = await runRoute({ input: "/conv 최근 검증에서 나온 P2 문제 수렴해줘", enabled: true });
+
+    assert.equal(conv.status, "routed");
+    assert.equal(conv.command, "/conv");
+    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("natural-conv-request.json")));
+    assert.ok(conv.user_report.evidence_pointers.some((path) => path.endsWith("conv.json")));
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
+test("/conv missing JSON path returns natural-language-first guidance", async () => {
+  const previousStateRoot = process.env.PILOT_STATE_ROOT;
+  const stateRoot = await tempStateRoot();
+  process.env.PILOT_STATE_ROOT = stateRoot;
+  try {
+    const conv = await runRoute({ input: "/conv artifacts/pilot/not-found-conv-request.json", enabled: true });
+
+    assert.equal(conv.status, "needs_user_decision");
+    assert.equal(conv.user_report.status, "advanced_artifact_path_missing");
+    assert.ok(conv.user_report.remaining_risks.some((risk) => risk.includes("Normal users can send a natural-language target")));
+    assert.match(conv.user_report.next_action, /\/conv 최근/);
+  } finally {
+    if (previousStateRoot === undefined) {
+      delete process.env.PILOT_STATE_ROOT;
+    } else {
+      process.env.PILOT_STATE_ROOT = previousStateRoot;
+    }
+  }
+});
+
 test("recovery commands surface copyable full run ids when a short id is ambiguous", async () => {
   const previousStateRoot = process.env.PILOT_STATE_ROOT;
   const stateRoot = await tempStateRoot();

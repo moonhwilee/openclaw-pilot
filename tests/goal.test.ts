@@ -499,8 +499,9 @@ test("pilot goal approved fixture can be run from the repository", () => {
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.status, "completed");
-  assert.equal(output.steps.length, 1);
+  assert.equal(output.status, "routed");
+  assert.equal(output.result_summary.status, "completed");
+  assert.equal(output.result_summary.steps, 1);
 });
 
 test("pilot goal draft fixture waits for approval from the repository", () => {
@@ -512,5 +513,6 @@ test("pilot goal draft fixture waits for approval from the repository", () => {
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.equal(output.status, "awaiting_approval");
-  assert.equal(output.steps.length, 0);
+  assert.equal(output.result_summary.status, "awaiting_approval");
+  assert.equal(output.result_summary.steps, 0);
 });

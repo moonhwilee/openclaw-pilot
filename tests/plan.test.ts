@@ -204,14 +204,14 @@ test("execution plan milestones must not reuse lifecycle phase names", () => {
   assert.ok(errors.some((error) => error.includes("must not reuse lifecycle phase name")));
 });
 
-test("CLI goal mode requires a structured request path", () => {
+test("CLI goal mode requires a natural objective or advanced request path", () => {
   const result = spawnSync(process.execPath, ["src/cli.ts", "goal"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /requires a goal request JSON path/);
+  assert.match(result.stderr, /requires a natural-language objective or advanced goal request JSON path/);
 });
 
 test("CLI smoke creates a local plan artifact", async () => {
@@ -230,4 +230,23 @@ test("CLI smoke creates a local plan artifact", async () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.status, "completed_plan");
   assert.equal(await fileExists(join(output.artifact_dir, "goal.json")), true);
+});
+
+test("CLI goal natural objective creates a goal-intake plan without execution", async () => {
+  const stateRoot = await tempStateRoot();
+  const result = spawnSync(
+    process.execPath,
+    ["src/cli.ts", "goal", "Draft a CLI natural goal plan and wait for approval."],
+    {
+      cwd: new URL("..", import.meta.url),
+      env: { ...process.env, PILOT_STATE_ROOT: stateRoot },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.status, "routed");
+  assert.equal(output.result_summary.mode, "goal_intake_plan");
+  assert.equal(output.user_report.status, "goal_plan_created");
 });
