@@ -21,6 +21,24 @@ lead a team, or spawn a hidden orchestrator agent. The owning agent main session
 remains the team leader and directly coordinates its own subagents through
 Pilot's control, evidence, and recovery surfaces.
 
+## Workbench Acceptance Fixture
+
+Before the Workbench alignment refactor, the acceptance fixture must define the
+shape of a team-leader-controlled Work Unit without changing runtime behavior.
+The fixture lives under `fixtures/workbench/team-leader-controlled/` and covers:
+
+- a positive Work Unit with `owner_main_session_ref`,
+  `pilot_control_mode=team-leader-controlled`, and
+  `subagent_orchestration_mode=direct-main-session`;
+- an Internal Context Packet that carries the same Work Unit and owner main
+  session refs;
+- an expected Pilot artifact that records control, evidence, recovery, lineage,
+  registry, and direct subagent task refs without becoming an actor;
+- a negative hidden-orchestrator artifact that must fail the fixture contract.
+
+The fixture is the pre-refactor contract. Runtime changes must later satisfy it
+without introducing a hidden orchestrator agent.
+
 ## v0.4.1 Correction Scope
 
 v0.4.0 shipped the shared user-facing presenter and `PlannerProvider` boundary,

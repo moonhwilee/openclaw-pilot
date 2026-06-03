@@ -1,0 +1,31 @@
+{
+  "schema_version": "pilot.workbench_artifact.v0",
+  "artifact_id": "pilot-artifact-team-leader-controlled-fixture",
+  "work_unit_ref": "wu-team-leader-controlled-pilot-fixture",
+  "owner_main_session_ref": "openclaw-session:development-agent:main",
+  "pilot_role": "control_evidence_recovery_feature",
+  "pilot_control_mode": "team-leader-controlled",
+  "subagent_orchestration_mode": "direct-main-session",
+  "direct_subagent_task_refs": [
+    "subagent-task:acceptance-fixture-review",
+    "subagent-task:acceptance-fixture-negative-check"
+  ],
+  "context_packet_ref": "fixtures/workbench/team-leader-controlled/internal-context-packet.json",
+  "local_registry_ref": "local-registry://openclaw-multi-agent-workbench/work-units/wu-team-leader-controlled-pilot-fixture",
+  "lineage_refs": [
+    "pilot-lineage://wu-team-leader-controlled-pilot-fixture/run"
+  ],
+  "evidence_refs": [
+    "evidence://openclaw-multi-agent-workbench/wu-team-leader-controlled-pilot-fixture/acceptance-fixture"
+  ],
+  "recovery_refs": [
+    "pilot-recovery://wu-team-leader-controlled-pilot-fixture/status"
+  ],
+  "forbidden_actor_refs": [],
+  "assertions": [
+    "Pilot is used by the owning OpenClaw agent main session.",
+    "Pilot records refs and evidence but does not become a Work Unit owner.",
+    "Subagent orchestration is direct from the owner main session.",
+    "No hidden orchestrator actor is present."
+  ]
+}

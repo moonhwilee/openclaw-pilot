@@ -1,0 +1,29 @@
+{
+  "schema_version": "openclaw.internal_context_packet.v0",
+  "context_packet_id": "icp-team-leader-controlled-pilot-fixture",
+  "work_unit_id": "wu-team-leader-controlled-pilot-fixture",
+  "owner_main_session_ref": "openclaw-session:development-agent:main",
+  "source_refs": [
+    "github-issue://moonhwilee/openclaw-multi-agent-workbench/fixture",
+    "local-registry://openclaw-multi-agent-workbench/work-units/wu-team-leader-controlled-pilot-fixture"
+  ],
+  "instructions": [
+    "The owning OpenClaw agent main session remains pilot-in-command.",
+    "Pilot records control, evidence, recovery, and lineage refs for the Work Unit.",
+    "The main session directly coordinates its own subagents."
+  ],
+  "constraints": [
+    "Pilot must not own or lead the Work Unit.",
+    "Pilot must not create a hidden orchestrator actor.",
+    "A subagent may be recorded only as a direct task of the owner main session."
+  ],
+  "acceptance_criteria": [
+    "owner_main_session_ref is present and stable across Work Unit, context packet, and Pilot artifact.",
+    "pilot_control_mode is team-leader-controlled.",
+    "subagent_orchestration_mode is direct-main-session.",
+    "No hidden orchestrator actor ref appears in the positive Pilot artifact."
+  ],
+  "expected_evidence_refs": [
+    "fixtures/workbench/team-leader-controlled/expected-pilot-artifact.json"
+  ]
+}

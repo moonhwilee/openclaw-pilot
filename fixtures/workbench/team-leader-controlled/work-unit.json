@@ -1,0 +1,27 @@
+{
+  "schema_version": "openclaw.work_unit.v0",
+  "work_unit_id": "wu-team-leader-controlled-pilot-fixture",
+  "title": "Team-leader-controlled Pilot acceptance fixture",
+  "assigned_by_ref": {
+    "actor_id": "goldbee-main-session",
+    "role": "research_lab_head"
+  },
+  "owner_agent_ref": {
+    "agent_id": "development-agent",
+    "role": "owning_openclaw_agent_team"
+  },
+  "owner_main_session_ref": "openclaw-session:development-agent:main",
+  "pilot_control_mode": "team-leader-controlled",
+  "subagent_orchestration_mode": "direct-main-session",
+  "subagent_task_refs": [
+    "subagent-task:acceptance-fixture-review",
+    "subagent-task:acceptance-fixture-negative-check"
+  ],
+  "context_packet_ref": "fixtures/workbench/team-leader-controlled/internal-context-packet.json",
+  "local_registry_ref": "local-registry://openclaw-multi-agent-workbench/work-units/wu-team-leader-controlled-pilot-fixture",
+  "pilot_artifact_ref": "fixtures/workbench/team-leader-controlled/expected-pilot-artifact.json",
+  "evidence_root_ref": "evidence://openclaw-multi-agent-workbench/wu-team-leader-controlled-pilot-fixture",
+  "forbidden_actor_refs": [
+    "hidden-orchestrator-agent"
+  ]
+}

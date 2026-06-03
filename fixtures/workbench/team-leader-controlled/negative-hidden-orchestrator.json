@@ -1,0 +1,22 @@
+{
+  "schema_version": "pilot.workbench_artifact.v0",
+  "artifact_id": "pilot-artifact-hidden-orchestrator-negative-fixture",
+  "work_unit_ref": "wu-team-leader-controlled-pilot-fixture",
+  "owner_main_session_ref": "openclaw-session:development-agent:main",
+  "pilot_role": "orchestrator_actor",
+  "pilot_control_mode": "pilot-owned",
+  "subagent_orchestration_mode": "hidden-orchestrator-agent",
+  "hidden_orchestrator_actor_ref": "hidden-orchestrator-agent",
+  "direct_subagent_task_refs": [],
+  "context_packet_ref": "fixtures/workbench/team-leader-controlled/internal-context-packet.json",
+  "local_registry_ref": "local-registry://openclaw-multi-agent-workbench/work-units/wu-team-leader-controlled-pilot-fixture",
+  "lineage_refs": [],
+  "evidence_refs": [],
+  "recovery_refs": [],
+  "forbidden_actor_refs": [
+    "hidden-orchestrator-agent"
+  ],
+  "assertions": [
+    "This fixture must fail because Pilot is represented as a hidden orchestrator actor."
+  ]
+}
