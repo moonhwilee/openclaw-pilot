@@ -1,14 +1,25 @@
 # OpenClaw Pilot Current Roadmap
 
-Status: v0.4.1 provider-backed planning correction
+Status: v0.4.1 shipped; Workbench alignment next
 Owner: Geumbi / Moonhwi Lee
 
 ## Current Release
 
-- Current shipped release: v0.4.0
-- Current target: v0.4.1
+- Current shipped release: v0.4.1
+- Current target: team-leader-controlled Pilot alignment for OpenClaw
+  Multi-Agent Workbench
 - Release theme: complete the v0.4.0 planning-runtime document goal by adding
   provider-backed planning and durable exact-bound interview context.
+
+## Naming And Semantics
+
+The product and package name remains `Pilot`.
+
+For Workbench alignment, Pilot must be treated as a feature used by the owning
+OpenClaw agent main session, not as an actor. Pilot must not own a Work Unit,
+lead a team, or spawn a hidden orchestrator agent. The owning agent main session
+remains the team leader and directly coordinates its own subagents through
+Pilot's control, evidence, and recovery surfaces.
 
 ## v0.4.1 Correction Scope
 
