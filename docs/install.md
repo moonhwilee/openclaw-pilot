@@ -7,13 +7,18 @@ Current workspace roadmap and TODO live at
 
 ## Quick Install
 
-Install from the current GitHub release tag:
+Install from a GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.3.0
+RELEASE_TAG=vX.Y.Z
+npm install -g --install-links "github:moonhwilee/openclaw-pilot#${RELEASE_TAG}"
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
+
+Use the latest tag from GitHub Releases unless you intentionally need a pinned
+older release. Current release state lives in package metadata and GitHub
+Releases, not in this install guide.
 
 After npm publishing, the install command will be:
 

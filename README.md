@@ -16,13 +16,18 @@ through `pilot artifact`.
 
 ## Install
 
-From the current GitHub release:
+From a GitHub release tag:
 
 ```bash
-npm install -g --install-links github:moonhwilee/openclaw-pilot#v0.3.0
+RELEASE_TAG=vX.Y.Z
+npm install -g --install-links "github:moonhwilee/openclaw-pilot#${RELEASE_TAG}"
 pilot init
 pilot plan "Draft a document strategy plan"
 ```
+
+Use the latest tag from GitHub Releases unless you intentionally need a pinned
+older release. Current release state lives in package metadata and GitHub
+Releases, not in this README.
 
 After the package is published to npm, the install command will be:
 
